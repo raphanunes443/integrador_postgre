@@ -1,0 +1,283 @@
+/* ============================================================
+   ARQUIVO: USUARIOS(ADM)/unidades_picker.css
+   COMPONENTE: Seletor de unidades com busca (multi-seleção)
+   Carregar DEPOIS do estilo.css, apenas nas telas que usam.
+   ============================================================ */
+
+.unidades-picker {
+    display: flex;
+    flex-direction: column;
+    background: #fafcff;
+    border: 1px solid #e2e9f3;
+    border-radius: 12px;
+    overflow: hidden;
+    font-family: 'Inter', sans-serif;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.unidades-picker:focus-within {
+    border-color: #1a73e8;
+    box-shadow: 0 0 0 4px rgba(26, 115, 232, 0.1);
+}
+
+/* ---------- Busca ---------- */
+.unidades-picker-search {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background: #ffffff;
+    border-bottom: 1px solid #eef2f8;
+}
+
+.unidades-picker-search > i.fa-search {
+    color: #8a9bb5;
+    font-size: 14px;
+    flex-shrink: 0;
+}
+
+.unidades-picker-input {
+    flex: 1;
+    border: none;
+    outline: none;
+    background: transparent;
+    font-family: inherit;
+    font-size: 14px;
+    color: #1a2639;
+    padding: 4px 0;
+}
+
+.unidades-picker-input::placeholder {
+    color: #9aabbf;
+}
+
+.unidades-picker-clear {
+    background: transparent;
+    border: none;
+    color: #8a9bb5;
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    transition: background 0.15s, color 0.15s;
+}
+
+.unidades-picker-clear:hover {
+    background: #f0f4fb;
+    color: #1a2639;
+}
+
+/* ---------- Lista ---------- */
+.unidades-picker-list {
+    max-height: 240px;
+    overflow-y: auto;
+    padding: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    scrollbar-width: thin;
+    scrollbar-color: #c1c9d6 #f0f4fb;
+}
+
+.unidades-picker-list::-webkit-scrollbar {
+    width: 8px;
+}
+
+.unidades-picker-list::-webkit-scrollbar-track {
+    background: #f0f4fb;
+    border-radius: 8px;
+}
+
+.unidades-picker-list::-webkit-scrollbar-thumb {
+    background: #c1c9d6;
+    border-radius: 8px;
+}
+
+.unidades-picker-list::-webkit-scrollbar-thumb:hover {
+    background: #a8b2c4;
+}
+
+/* ---------- Item (label clicável) ---------- */
+.unidade-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    color: #1a2639;
+    transition: background 0.15s;
+    position: relative;
+    user-select: none;
+}
+
+.unidade-item:hover {
+    background: #f0f6ff;
+}
+
+.unidade-item input[type="checkbox"] {
+    /* Esconde o checkbox nativo, mas mantém acessível por teclado */
+    position: absolute;
+    opacity: 0;
+    width: 1px;
+    height: 1px;
+    margin: 0;
+    pointer-events: none;
+}
+
+/* Caixinha visual (substitui o checkbox nativo) */
+.unidade-item-check {
+    width: 20px;
+    height: 20px;
+    border: 2px solid #c1c9d6;
+    border-radius: 6px;
+    background: #ffffff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: background 0.15s, border-color 0.15s, transform 0.1s;
+}
+
+.unidade-item-check i {
+    font-size: 11px;
+    color: #ffffff;
+    opacity: 0;
+    transform: scale(0.6);
+    transition: opacity 0.15s, transform 0.15s;
+}
+
+.unidade-item input[type="checkbox"]:checked + .unidade-item-check {
+    background: #1a73e8;
+    border-color: #1a73e8;
+}
+
+.unidade-item input[type="checkbox"]:checked + .unidade-item-check i {
+    opacity: 1;
+    transform: scale(1);
+}
+
+.unidade-item input[type="checkbox"]:focus-visible + .unidade-item-check {
+    outline: 2px solid #1a73e8;
+    outline-offset: 2px;
+}
+
+.unidade-item-nome {
+    flex: 1;
+    line-height: 1.4;
+}
+
+/* Estado "marcado" — destaca sutilmente a linha */
+.unidade-item:has(input[type="checkbox"]:checked) {
+    background: #eff6ff;
+}
+
+/* ---------- Estado vazio / sem resultado ---------- */
+.unidades-picker-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 32px 20px;
+    color: #7a8aa0;
+    font-size: 13px;
+    text-align: center;
+}
+
+.unidades-picker-empty i {
+    font-size: 28px;
+    color: #dce3ef;
+}
+
+/* ---------- Rodapé (contador + botão) ---------- */
+.unidades-picker-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 14px;
+    background: #ffffff;
+    border-top: 1px solid #eef2f8;
+}
+
+.unidades-picker-count {
+    font-size: 13px;
+    font-weight: 600;
+    color: #1a73e8;
+}
+
+.unidades-picker-count.is-empty {
+    color: #7a8aa0;
+    font-weight: 500;
+}
+
+.unidades-picker-toggle {
+    background: transparent;
+    border: none;
+    color: #1a73e8;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 6px 10px;
+    border-radius: 8px;
+    transition: background 0.15s;
+}
+
+.unidades-picker-toggle:hover {
+    background: #f0f6ff;
+}
+
+/* ---------- Hint abaixo do picker ---------- */
+.unidades-picker-hint {
+    display: inline-block;
+    margin-top: 8px;
+    color: #7a8aa0;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.unidades-picker-hint i {
+    margin-right: 4px;
+    color: #8a9bb5;
+}
+
+/* ---------- Responsivo ---------- */
+@media (max-width: 600px) {
+    .unidades-picker-list {
+        max-height: 200px;
+    }
+
+    .unidade-item {
+        padding: 12px 10px;
+        font-size: 13px;
+    }
+
+    .unidades-picker-footer {
+        flex-wrap: wrap;
+        gap: 6px;
+    }
+
+    .unidades-picker-toggle {
+        font-size: 12px;
+        padding: 4px 8px;
+    }
+}
+
+/* ---------- Acessibilidade: movimento reduzido ---------- */
+@media (prefers-reduced-motion: reduce) {
+    .unidades-picker,
+    .unidades-picker-input,
+    .unidades-picker-clear,
+    .unidade-item,
+    .unidade-item-check,
+    .unidade-item-check i,
+    .unidades-picker-toggle {
+        transition: none;
+    }
+}

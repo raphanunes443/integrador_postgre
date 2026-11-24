@@ -69,7 +69,7 @@ function buscarDiasRecesso($conn, $id_unidade, $id_cliente, $id_curso = null) {
         ];
         
         if ($id_curso) {
-            $sql .= " AND (id_cursos IS NULL OR FIND_IN_SET(:id_curso, id_cursos) > 0)";
+            $sql .= " AND (id_cursos IS NULL OR CAST(:id_curso AS TEXT) = ANY(string_to_array(id_cursos, ',')))";
             $params[':id_curso'] = $id_curso;
         }
         
@@ -233,7 +233,7 @@ function empurrarAulas($conn, $data_inicio, $data_fim, $id_unidade, $id_cliente,
                 $novaData = $dataAtual->format('Y-m-d');
                 $sqlUpdate = "UPDATE cronograma SET 
                                 data_aula = :nova_data,
-                                observacao = CONCAT(IFNULL(observacao, ''), ' | Recesso em ', :data_original, ' - Aula remanejada para ', :nova_data)
+                                observacao = CONCAT(COALESCE(observacao, ''), ' | Recesso em ', :data_original, ' - Aula remanejada para ', :nova_data)
                               WHERE id_aula = :id_aula AND id_cliente = :id_cliente";
                 $stmtUpdate = $conn->prepare($sqlUpdate);
                 $stmtUpdate->execute([
@@ -250,7 +250,7 @@ function empurrarAulas($conn, $data_inicio, $data_fim, $id_unidade, $id_cliente,
             } else {
                 $sqlUpdate = "UPDATE cronograma SET 
                                 status_aula = 'aguardando_remarcacao',
-                                observacao = CONCAT(IFNULL(observacao, ''), ' | Recesso em ', :data_original, ' - Aguardando remarcação')
+                                observacao = CONCAT(COALESCE(observacao, ''), ' | Recesso em ', :data_original, ' - Aguardando remarcação')
                               WHERE id_aula = :id_aula AND id_cliente = :id_cliente";
                 $stmtUpdate = $conn->prepare($sqlUpdate);
                 $stmtUpdate->execute([

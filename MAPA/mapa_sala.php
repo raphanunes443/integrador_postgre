@@ -257,7 +257,7 @@ try {
         $sqlManut = "SELECT id_sala, data_inicio, data_fim, status, motivo 
                      FROM manutencoes 
                      WHERE id_cliente = :id_cliente
-                     AND :data_hoje BETWEEN data_inicio AND data_fim
+                     AND CAST(:data_hoje AS DATE) BETWEEN data_inicio AND data_fim
                      AND status != 'concluida'";
         
         $stmtManut = $conn->prepare($sqlManut);

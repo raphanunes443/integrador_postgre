@@ -45,9 +45,9 @@ try {
     $params = [':id_cliente' => $id_cliente];
     
     if (!empty($busca)) {
-        $where .= " AND (nome_unidade LIKE :busca 
-                 OR cidade_unidade LIKE :busca 
-                 OR estado_unidade LIKE :busca)";
+        $where .= " AND (nome_unidade ILIKE :busca 
+                OR cidade_unidade ILIKE :busca 
+                OR estado_unidade ILIKE :busca)";
         $params[':busca'] = '%' . $busca . '%';
     }
     

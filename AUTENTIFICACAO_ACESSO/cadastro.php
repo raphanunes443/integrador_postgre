@@ -90,7 +90,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             (:nome, :tipo, :cnpj, :email, 
                              :telefone, :endereco, :cidade, 
                              :estado, 'ativo', 'gratuito', 
-                             3, 10)";
+                             3, 10) RETURNING id_cliente";
                     $stmt = $conn->prepare($sql);
                     $stmt->execute([
                         ':nome' => $dados_form['nome_cliente'],

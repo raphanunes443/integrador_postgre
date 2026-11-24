@@ -86,14 +86,16 @@ try {
             id_registro_afetado,
             acao,
             dados_novos,
-            ip_origem
+            ip_origem,
+            data_acao
         ) VALUES (
             :id_funcionario,
             'unidades',
             :id_registro,
             'UPDATE',
             :dados,
-            :ip
+            :ip,
+            NOW()
         )";
         $stmtHistorico = $conn->prepare($sqlHistorico);
         $stmtHistorico->execute([

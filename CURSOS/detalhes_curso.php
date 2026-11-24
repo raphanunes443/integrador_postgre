@@ -85,7 +85,7 @@ function buscarDiasRecesso($conn, $id_unidade, $id_cliente, $id_curso = null) {
         ];
         
         if ($id_curso) {
-            $sql .= " AND (id_cursos IS NULL OR FIND_IN_SET(:id_curso, id_cursos) > 0)";
+            $sql .= " AND (id_cursos IS NULL OR CAST(:id_curso AS TEXT) = ANY(string_to_array(id_cursos, ',')))";
             $params[':id_curso'] = $id_curso;
         }
         

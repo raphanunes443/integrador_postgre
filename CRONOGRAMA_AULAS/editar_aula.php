@@ -482,8 +482,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $sqlUpdate = "UPDATE cronograma SET 
                                 data_aula = :nova_data,
                                 status_aula = 'agendada',
-                                observacao = CONCAT(IFNULL(observacao, ''), ' | Aula remarcada de ', :data_original, ' para ', :nova_data_exibicao)
-                              WHERE id_aula = :id_aula AND id_cliente = :id_cliente";
+                                observacao = CONCAT(COALESCE(observacao, ''), ' | Aula remarcada de ', :data_original, ' para ', :nova_data_exibicao)
+                            WHERE id_aula = :id_aula AND id_cliente = :id_cliente";
                 $stmtUpdate = $conn->prepare($sqlUpdate);
                 $stmtUpdate->execute([
                     ':nova_data' => $nova_data,
@@ -516,8 +516,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // Marcar a aula como cancelada
                 $sqlUpdate = "UPDATE cronograma SET 
                                 status_aula = 'cancelada',
-                                observacao = CONCAT(IFNULL(observacao, ''), ' | Aula cancelada em ', NOW())
-                              WHERE id_aula = :id_aula AND id_cliente = :id_cliente";
+                                observacao = CONCAT(COALESCE(observacao, ''), ' | Aula cancelada em ', NOW())
+                            WHERE id_aula = :id_aula AND id_cliente = :id_cliente";
                 $stmtUpdate = $conn->prepare($sqlUpdate);
                 $stmtUpdate->execute([
                     ':id_aula' => $id_aula,
@@ -569,7 +569,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             horario_inicio = :horario_inicio,
                             horario_fim = :horario_fim,
                             status_aula = :status_aula,
-                            observacao = CONCAT(IFNULL(observacao, ''), ' | ', :observacao)
+                            observacao = CONCAT(COALESCE(observacao, ''), ' | ', :observacao)
                         WHERE id_aula = :id_aula AND id_cliente = :id_cliente";
             
             $stmtUpdate = $conn->prepare($sqlUpdate);

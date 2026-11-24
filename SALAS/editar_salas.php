@@ -185,8 +185,8 @@ function marcarAulasAguardando($conn, $id_sala, $id_cliente, $data_inicio, $data
         foreach ($aulas as $aula) {
             $sqlUpdate = "UPDATE cronograma SET 
                             status_aula = 'aguardando_remarcacao',
-                            observacao = CONCAT(IFNULL(observacao, ''), ' | Sala em manutenção - Aguardando remarcação')
-                          WHERE id_aula = :id_aula AND id_cliente = :id_cliente";
+                            observacao = CONCAT(COALESCE(observacao, ''), ' | Sala em manutenção - Aguardando remarcação')
+                        WHERE id_aula = :id_aula AND id_cliente = :id_cliente";
             $stmtUpdate = $conn->prepare($sqlUpdate);
             $stmtUpdate->execute([
                 ':id_aula' => $aula['id_aula'],
@@ -269,7 +269,7 @@ function atualizarAulasParaAguardandoRemarcacao($conn, $id_sala, $id_cliente, $s
                           WHERE id_sala = :id_sala 
                           AND id_cliente = :id_cliente
                           AND status_aula IN ('agendada', 'remarcada', 'aguardando_remarcacao')
-                          AND data_aula >= CURDATE()";
+                          AND data_aula >= CURRENT_DATE";
             $stmtBuscar = $conn->prepare($sqlBuscar);
             $stmtBuscar->execute([
                 ':id_sala' => $id_sala,
@@ -283,8 +283,8 @@ function atualizarAulasParaAguardandoRemarcacao($conn, $id_sala, $id_cliente, $s
             if ($totalAulas > 0) {
                 $sqlUpdate = "UPDATE cronograma SET 
                                 status_aula = 'aguardando_remarcacao',
-                                observacao = CONCAT(IFNULL(observacao, ''), ' | Sala inativada - Aguardando remarcação')
-                              WHERE id_aula = :id_aula AND id_cliente = :id_cliente";
+                                observacao = CONCAT(COALESCE(observacao, ''), ' | Sala inativada - Aguardando remarcação')
+                            WHERE id_aula = :id_aula AND id_cliente = :id_cliente";
                 $stmtUpdate = $conn->prepare($sqlUpdate);
 
                 foreach ($aulas as $aula) {
@@ -422,11 +422,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['acao_manutencao']) &
 
                 if ($status_anterior === 'inativa' && $status_novo !== 'inativa') {
                     $sqlReativar = "UPDATE cronograma SET 
-                                    status_aula = 'agendada',
-                                    observacao = CONCAT(IFNULL(observacao, ''), ' | Sala reativada - Aula reagendada')
-                                  WHERE id_sala = :id_sala 
-                                  AND id_cliente = :id_cliente
-                                  AND status_aula = 'aguardando_remarcacao'";
+                                        status_aula = 'agendada',
+                                        observacao = CONCAT(COALESCE(observacao, ''), ' | Sala reativada - Aula reagendada')
+                                    WHERE id_sala = :id_sala 
+                                    AND id_cliente = :id_cliente
+                                    AND status_aula = 'aguardando_remarcacao'";
                     $stmtReativar = $conn->prepare($sqlReativar);
                     $stmtReativar->execute([
                         ':id_sala' => $id_sala,
@@ -729,7 +729,7 @@ if ($sala['status_sala'] !== 'inativa') {
                                     WHERE id_sala = :id_sala 
                                     AND id_cliente = :id_cliente
                                     AND status_aula IN ('agendada', 'remarcada')
-                                    AND data_aula >= CURDATE()");
+                                    AND data_aula >= CURRENT_DATE");
         $stmtAulas->execute([
             ':id_sala' => $id_sala,
             ':id_cliente' => $id_cliente

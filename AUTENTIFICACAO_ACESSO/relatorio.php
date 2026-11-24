@@ -96,11 +96,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['acao'])) {
                 
                 // Atualizar aulas
                 $sql = "UPDATE cronograma 
-                        SET status_aula = 'realizada', 
-                            observacao = CONCAT(IFNULL(observacao, ''), ' | Marcada como concluída em ', NOW())
-                        WHERE id_aula IN ($placeholders)
-                        AND id_cliente = ?
-                        AND id_unidade = ?";
+                    SET status_aula = 'realizada', 
+                        observacao = CONCAT(COALESCE(observacao, ''), ' | Marcada como concluída em ', NOW())
+                    WHERE id_aula IN ($placeholders)
+                    AND id_cliente = ?
+                    AND id_unidade = ?";
                 
                 $stmt = $conn->prepare($sql);
                 $params = array_merge($aulas_ids, [$id_cliente, $id_unidade]);
@@ -149,7 +149,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['acao'])) {
             // Atualizar aulas
             $sql = "UPDATE cronograma 
                     SET status_aula = 'realizada',
-                        observacao = CONCAT(IFNULL(observacao, ''), ' | Todas as aulas do dia marcadas como concluídas em ', NOW())
+                        observacao = CONCAT(COALESCE(observacao, ''), ' | Todas as aulas do dia marcadas como concluídas em ', NOW())
                     WHERE data_aula = :data 
                     AND status_aula = 'agendada'
                     AND id_cliente = :id_cliente
@@ -195,7 +195,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['acao'])) {
                 // Atualizar aulas
                 $sql = "UPDATE cronograma 
                         SET status_aula = 'realizada', 
-                            observacao = CONCAT(IFNULL(observacao, ''), ' | Marcada como concluída retroativamente em ', NOW())
+                            observacao = CONCAT(COALESCE(observacao, ''), ' | Marcada como concluída retroativamente em ', NOW())
                         WHERE id_aula IN ($placeholders)
                         AND id_cliente = ?
                         AND id_unidade = ?";

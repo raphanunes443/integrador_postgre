@@ -254,7 +254,7 @@ if ($tipo_usuario === 'admin_cliente' && !empty($unidadeSelecionada)) {
 }
 
 if (!empty($filtro_numero)) {
-    $where .= " AND numero_sala LIKE :numero";
+    $where .= " AND CAST(numero_sala AS TEXT) ILIKE :numero";
     $params[':numero'] = '%' . $filtro_numero . '%';
 }
 
@@ -299,7 +299,7 @@ try {
     $sqlManut = "SELECT id_sala, data_inicio, data_fim, status, motivo 
                  FROM manutencoes 
                  WHERE id_cliente = :id_cliente
-                 AND :data_hoje BETWEEN data_inicio AND data_fim
+                 AND CAST(:data_hoje AS DATE) BETWEEN data_inicio AND data_fim
                  AND status != 'concluida'";
     
     $stmtManut = $conn->prepare($sqlManut);

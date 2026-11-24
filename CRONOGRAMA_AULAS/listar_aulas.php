@@ -115,7 +115,12 @@ try {
     }
 
     // Ordenação: por turno e horário
-    $sql .= " ORDER BY FIELD(c.turno, 'manha', 'tarde', 'noite'), c.horario_inicio ASC";
+    $sql .= " ORDER BY CASE c.turno 
+                        WHEN 'manha' THEN 1 
+                        WHEN 'tarde' THEN 2 
+                        WHEN 'noite' THEN 3 
+                        ELSE 4 
+                    END ASC, c.horario_inicio ASC";
 
     $stmt = $conn->prepare($sql);
     $stmt->execute($params);

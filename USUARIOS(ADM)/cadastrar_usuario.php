@@ -211,14 +211,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             id_registro_afetado,
                             acao,
                             dados_novos,
-                            ip_origem
+                            ip_origem,
+                            data_acao
                         ) VALUES (
                             :id_funcionario,
                             'usuarios_sistema',
                             :id_registro,
                             'INSERT',
                             :dados,
-                            :ip
+                            :ip,
+                            NOW()
                         )";
                         $stmtHistorico = $conn->prepare($sqlHistorico);
                         $stmtHistorico->execute([
@@ -228,7 +230,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 'usuario' => $nome,
                                 'email' => $email,
                                 'tipo' => $tipo_usuario_novo,
-                                'unidades' => $unidades_selecionadas // Salvando as unidades no log
+                                'unidades' => $unidades_selecionadas
                             ]),
                             ':ip' => $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0'
                         ]);

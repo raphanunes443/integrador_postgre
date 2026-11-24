@@ -118,8 +118,8 @@ try {
     }
     
     if (!empty($busca)) {
-        $where .= " AND (c.nome_curso LIKE :busca 
-                 OR c.numero_curso LIKE :busca)";
+        $where .= " AND (c.nome_curso ILIKE :busca 
+                OR c.numero_curso ILIKE :busca)";
         $params[':busca'] = '%' . $busca . '%';
     }
     

@@ -104,8 +104,8 @@ try {
                 u.tipo_usuario, 
                 u.status_usuario, 
                 u.data_cadastro, 
-                GROUP_CONCAT(uni.nome_unidade SEPARATOR ', ') as nome_unidade,
-                GROUP_CONCAT(uni.estado_unidade SEPARATOR ', ') as estado_unidade
+                STRING_AGG(uni.nome_unidade, ', ') as nome_unidade,
+                STRING_AGG(uni.estado_unidade, ', ') as estado_unidade
             FROM usuarios_sistema u
             LEFT JOIN usuarios_unidades uu ON u.id_usuario = uu.id_usuario
             LEFT JOIN unidades uni ON uu.id_unidade = uni.id_unidade
@@ -139,11 +139,10 @@ try {
     }
 
     if (!empty($busca)) {
-        $sql .= " AND (u.nome_usuario LIKE :busca OR u.email_usuario LIKE :busca)";
+        $sql .= " AND (u.nome_usuario ILIKE :busca OR u.email_usuario ILIKE :busca)";
         $params[':busca'] = '%' . $busca . '%';
     }
 
-    // Como usamos GROUP_CONCAT, precisamos agrupar pelo ID do usuário
     $sql .= " GROUP BY u.id_usuario ORDER BY u.nome_usuario";
 
     // Query de contagem (usando subquery para respeitar o GROUP BY)

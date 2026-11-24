@@ -93,7 +93,7 @@ try {
         $sqlCursos .= " AND c.id_unidade = :id_unidade";
     }
     
-    $sqlCursos .= " GROUP BY c.id_curso";
+    $sqlCursos .= " GROUP BY c.id_curso, u.nome_unidade";
     $sqlCursos .= " ORDER BY c.numero_curso, c.nome_curso";
     
     $stmtCursos = $conn->prepare($sqlCursos);
@@ -138,7 +138,7 @@ if (isset($_GET['id_curso']) && !empty($_GET['id_curso'])) {
                     LEFT JOIN cronograma cron ON c.id_curso = cron.id_curso AND cron.id_cliente = c.id_cliente
                     WHERE c.id_curso = :id_curso
                     AND c.id_cliente = :id_cliente
-                    GROUP BY c.id_curso";
+                    GROUP BY c.id_curso, u.nome_unidade, u.endereco_unidade, u.telefone_unidade";
         
         $stmtCurso = $conn->prepare($sqlCurso);
         $stmtCurso->execute([

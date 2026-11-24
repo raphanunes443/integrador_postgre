@@ -130,14 +130,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirmar'])) {
                 id_registro_afetado,
                 acao,
                 dados_novos,
-                ip_origem
+                ip_origem,
+                data_acao
             ) VALUES (
                 :id_admin,
                 'funcionarios',
                 :id_user,
                 'UPDATE',
                 :dados,
-                :ip
+                :ip,
+                NOW()
             )";
             $stmtHist = $conn->prepare($sqlHistorico);
             $stmtHist->execute([

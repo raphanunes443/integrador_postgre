@@ -126,7 +126,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 WHERE id_sala = :id_sala 
                 AND id_cliente = :id_cliente
                 AND status != 'concluida'
-                AND ((data_inicio <= :data_fim AND data_fim >= :data_inicio))
+                AND ((data_inicio <= CAST(:data_fim AS DATE) AND data_fim >= CAST(:data_inicio AS DATE)))
             ");
             $stmtCheckManut->execute([
                 ':id_sala' => $id_sala,

@@ -136,14 +136,16 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" || $_SERVER["REQUEST_METHOD"] == "GET")
                 id_registro_afetado,
                 acao,
                 dados_anteriores,
-                ip_origem
+                ip_origem,
+                data_acao
             ) VALUES (
                 :id_funcionario,
                 'salas',
                 :id_registro,
                 'DELETE',
                 :dados,
-                :ip
+                :ip,
+                NOW()
             )";
             $stmtHistorico = $conn->prepare($sqlHistorico);
             $stmtHistorico->execute([

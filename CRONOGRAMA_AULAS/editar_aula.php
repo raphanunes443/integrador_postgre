@@ -478,11 +478,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     throw new Exception('⚠️ Conflito de horário na nova data. Escolha outra data ou sala.');
                 }
                 
-                // Atualizar a aula para a nova data
+                // Atualizar a aula para a nova data (CORRIGIDO PARA POSTGRESQL)
                 $sqlUpdate = "UPDATE cronograma SET 
                                 data_aula = :nova_data,
                                 status_aula = 'agendada',
-                                observacao = CONCAT(COALESCE(observacao, ''), ' | Aula remarcada de ', :data_original, ' para ', :nova_data_exibicao)
+                                observacao = COALESCE(observacao, '') || ' | Aula remarcada de ' || :data_original::text || ' para ' || :nova_data_exibicao::text
                             WHERE id_aula = :id_aula AND id_cliente = :id_cliente";
                 $stmtUpdate = $conn->prepare($sqlUpdate);
                 $stmtUpdate->execute([
@@ -513,10 +513,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // CASO: CANCELADA
             // ============================================================
             if ($status_aula === 'cancelada') {
-                // Marcar a aula como cancelada
+                // Marcar a aula como cancelada (CORRIGIDO PARA POSTGRESQL)
                 $sqlUpdate = "UPDATE cronograma SET 
                                 status_aula = 'cancelada',
-                                observacao = CONCAT(COALESCE(observacao, ''), ' | Aula cancelada em ', NOW())
+                                observacao = COALESCE(observacao, '') || ' | Aula cancelada em ' || NOW()::text
                             WHERE id_aula = :id_aula AND id_cliente = :id_cliente";
                 $stmtUpdate = $conn->prepare($sqlUpdate);
                 $stmtUpdate->execute([
@@ -562,14 +562,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new Exception('⚠️ Já existe uma aula agendada nesta sala neste horário.');
             }
             
-            // Atualizar a aula
+            // Atualizar a aula (CORRIGIDO PARA POSTGRESQL)
             $sqlUpdate = "UPDATE cronograma SET 
                             id_professor = :id_professor,
                             id_sala = :id_sala,
                             horario_inicio = :horario_inicio,
                             horario_fim = :horario_fim,
                             status_aula = :status_aula,
-                            observacao = CONCAT(COALESCE(observacao, ''), ' | ', :observacao)
+                            observacao = COALESCE(observacao, '') || ' | ' || :observacao::text
                         WHERE id_aula = :id_aula AND id_cliente = :id_cliente";
             
             $stmtUpdate = $conn->prepare($sqlUpdate);

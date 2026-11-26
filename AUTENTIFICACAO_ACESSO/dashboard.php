@@ -16,8 +16,6 @@ if (session_status() === PHP_SESSION_NONE) {
 // ============================================================
 // 3. VERIFICAR SE ESTÁ LOGADO - 
 // ============================================================
-// NÃO use isLoggedIn() se a função não estiver definida ainda
-// Use a verificação direta:
 if (!isset($_SESSION['id_usuario']) || !isset($_SESSION['id_cliente'])) {
     header('Location: realizar_login.php');
     exit;
@@ -30,11 +28,11 @@ $nome_usuario = $_SESSION['nome_usuario'] ?? 'Usuário';
 $nome_cliente = $_SESSION['nome_cliente'] ?? '';
 $tipo_usuario = $_SESSION['tipo_usuario'] ?? '';
 $id_cliente = $_SESSION['id_cliente'] ?? 0;
+$id_unidade_sessao = $_SESSION['usuario_unidade'] ?? 0;
 
 // ============================================================
 // 5. BUSCAR ESTATÍSTICAS 
 // ============================================================
-// Se tiver conexão com banco, pode buscar dados
 $stats = [
     'total_unidades' => 0,
     'total_cursos' => 0,
@@ -42,8 +40,11 @@ $stats = [
     'total_salas' => 0
 ];
 
+$lista_unidades = [];
+
 if (isset($conn) && $id_cliente > 0) {
     try {
+        // Estatísticas
         $stmt = $conn->prepare("
             SELECT 
                 (SELECT COUNT(*) FROM unidades WHERE id_cliente = ?) as total_unidades,
@@ -53,6 +54,14 @@ if (isset($conn) && $id_cliente > 0) {
         ");
         $stmt->execute([$id_cliente, $id_cliente, $id_cliente, $id_cliente]);
         $stats = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        // Buscar unidades para o modal de relatório (Apenas se for admin ou gerente)
+        if (in_array($tipo_usuario, ['admin_cliente', 'gerente'])) {
+            $stmt_unidades = $conn->prepare("SELECT id_unidade, nome_unidade FROM unidades WHERE id_cliente = ? AND status_unidade = 'ativo' ORDER BY nome_unidade ASC");
+            $stmt_unidades->execute([$id_cliente]);
+            $lista_unidades = $stmt_unidades->fetchAll(PDO::FETCH_ASSOC);
+        }
+
     } catch (PDOException $e) {
         // Ignora erro de estatísticas
     }
@@ -289,6 +298,13 @@ $titulo = 'Dashboard - Gerenciamento de Ambientes';
             margin-top: 4px;
         }
 
+        .header-actions {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
         .btn {
             padding: 9px 20px;
             border-radius: 60px;
@@ -301,6 +317,7 @@ $titulo = 'Dashboard - Gerenciamento de Ambientes';
             cursor: pointer;
             transition: all 0.2s;
             text-decoration: none;
+            font-family: 'Inter', sans-serif;
         }
 
         .btn-danger {
@@ -310,6 +327,17 @@ $titulo = 'Dashboard - Gerenciamento de Ambientes';
         }
         .btn-danger:hover {
             background: #c82333;
+        }
+
+        .btn-primary {
+            background: #1a73e8;
+            color: #ffffff;
+            border: none;
+            box-shadow: 0 6px 16px -4px rgba(26, 115, 232, 0.35);
+        }
+        .btn-primary:hover {
+            background: #1557b0;
+            transform: translateY(-1px);
         }
 
         .stats-grid {
@@ -400,12 +428,114 @@ $titulo = 'Dashboard - Gerenciamento de Ambientes';
         }
 
         /* ======================================================
+           MODAL - NOVO
+        ====================================================== */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(10, 25, 47, 0.5);
+            z-index: 2000;
+            align-items: center;
+            justify-content: center;
+            backdrop-filter: blur(3px);
+        }
+        .modal-overlay.active {
+            display: flex;
+        }
+        .modal-box {
+            background: #ffffff;
+            border-radius: 20px;
+            padding: 28px;
+            width: 100%;
+            max-width: 450px;
+            box-shadow: 0 25px 50px -12px rgba(0,0,0,0.3);
+            animation: modalIn 0.2s ease-out;
+        }
+        @keyframes modalIn {
+            from { opacity: 0; transform: scale(0.95); }
+            to { opacity: 1; transform: scale(1); }
+        }
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            border-bottom: 1px solid #eef3fa;
+            padding-bottom: 12px;
+        }
+        .modal-header h3 {
+            font-size: 18px;
+            color: #0e1a2b;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .modal-header h3 i { color: #1a73e8; }
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 20px;
+            color: #7a8aa0;
+            cursor: pointer;
+            transition: color 0.2s;
+        }
+        .modal-close:hover { color: #dc3545; }
+
+        .modal-form-group {
+            margin-bottom: 20px;
+        }
+        .modal-form-group label {
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            color: #1a2639;
+            margin-bottom: 6px;
+        }
+        .modal-form-group select {
+            width: 100%;
+            padding: 12px 14px;
+            border-radius: 12px;
+            border: 1px solid #e2e9f3;
+            background: #fafcff;
+            font-family: 'Inter', sans-serif;
+            font-size: 14px;
+            color: #1a2639;
+            outline: none;
+            cursor: pointer;
+            transition: border-color 0.2s;
+        }
+        .modal-form-group select:focus {
+            border-color: #1a73e8;
+            box-shadow: 0 0 0 4px rgba(26, 115, 232, 0.1);
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+            margin-top: 10px;
+        }
+        .btn-cancel {
+            background: #f0f4fb;
+            color: #5a6a7e;
+        }
+        .btn-cancel:hover {
+            background: #e2e9f3;
+        }
+
+        /* ======================================================
            RESPONSIVIDADE
         ====================================================== */
         @media (max-width: 820px) {
             .sidebar { display: none; }
             .main { padding: 16px 18px; }
             .stats-grid { grid-template-columns: 1fr 1fr; }
+            .header-actions { width: 100%; margin-top: 10px; }
+            .header-actions .btn { flex: 1; justify-content: center; }
         }
 
         @media (max-width: 540px) {
@@ -413,6 +543,7 @@ $titulo = 'Dashboard - Gerenciamento de Ambientes';
             .page-header { flex-direction: column; align-items: flex-start; }
             .stats-grid { grid-template-columns: 1fr; }
             .menu-grid { grid-template-columns: 1fr 1fr; }
+            .modal-box { padding: 20px; margin: 15px; }
         }
 
         .menu-toggle {
@@ -474,9 +605,11 @@ $titulo = 'Dashboard - Gerenciamento de Ambientes';
                 <h1 class="page-title"><i class="fas fa-chart-pie"></i> Dashboard</h1>
                 <p class="page-subtitle">Bem-vindo(a), <?php echo htmlspecialchars($nome_usuario); ?>!</p>
             </div>
-            <div style="font-size: 13px; color: #7a8aa0;">
-                <i class="fas fa-building"></i> <?php echo htmlspecialchars($nome_cliente); ?>
-                <span style="margin-left: 10px; background: #e3f2fd; padding: 2px 12px; border-radius: 12px; color: #0d47a1; font-weight: 500;">
+            <div class="header-actions">
+                <span style="font-size: 13px; color: #7a8aa0; display: flex; align-items: center; gap: 6px;">
+                    <i class="fas fa-building"></i> <?php echo htmlspecialchars($nome_cliente); ?>
+                </span>
+                <span style="background: #e3f2fd; padding: 4px 12px; border-radius: 12px; color: #0d47a1; font-weight: 500; font-size: 13px;">
                     <?php 
                     $tipos = [
                         'admin_cliente' => 'Administrador',
@@ -487,6 +620,21 @@ $titulo = 'Dashboard - Gerenciamento de Ambientes';
                     echo $tipos[$tipo_usuario] ?? $tipo_usuario; 
                     ?>
                 </span>
+
+                <!-- BOTÃO GERAR RELATÓRIO DE OCUPAÇÃO -->
+                <?php if (in_array($tipo_usuario, ['admin_cliente', 'gerente'])): ?>
+                    <?php if ($tipo_usuario === 'admin_cliente'): ?>
+                        <!-- Para Admin: Abre o modal para escolher a unidade -->
+                        <button type="button" class="btn btn-primary" onclick="abrirModalRelatorio()">
+                            <i class="fas fa-file-alt"></i> Gerar Relatório de Ocupação
+                        </button>
+                    <?php else: ?>
+                        <!-- Para Coordenador: Vai direto para a página de relatório com a unidade vinculada -->
+                        <a href="../RELATORIOS/relatorio_ocupacao.php?id_unidade=<?php echo $id_unidade_sessao; ?>" class="btn btn-primary">
+                            <i class="fas fa-file-alt"></i> Gerar Relatório de Ocupação
+                        </a>
+                    <?php endif; ?>
+                <?php endif; ?>
             </div>
         </header>
 
@@ -553,6 +701,56 @@ $titulo = 'Dashboard - Gerenciamento de Ambientes';
 
         <?php include_once __DIR__ . '/../INCLUDES/footer.php'; ?>
     </main>
+
+    <!-- ======================================================
+         MODAL DE SELEÇÃO DE UNIDADE (Apenas para Admin)
+    ====================================================== -->
+    <div class="modal-overlay" id="modalRelatorio">
+        <div class="modal-box">
+            <div class="modal-header">
+                <h3><i class="fas fa-building"></i> Selecione a Unidade</h3>
+                <button type="button" class="modal-close" onclick="fecharModalRelatorio()">&times;</button>
+            </div>
+            
+            <form action="../MAPA/relatorio.php" method="GET">
+                <div class="modal-form-group">
+                    <label for="select_unidade">Escolha de qual unidade deseja gerar o relatório:</label>
+                    <select name="id_unidade" id="select_unidade" required>
+                        <option value="">-- Selecione uma unidade --</option>
+                        <?php foreach ($lista_unidades as $unidade): ?>
+                            <option value="<?php echo $unidade['id_unidade']; ?>">
+                                <?php echo htmlspecialchars($unidade['nome_unidade']); ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-cancel" onclick="fecharModalRelatorio()">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-file-alt"></i> Gerar Relatório
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        function abrirModalRelatorio() {
+            document.getElementById('modalRelatorio').classList.add('active');
+        }
+
+        function fecharModalRelatorio() {
+            document.getElementById('modalRelatorio').classList.remove('active');
+        }
+
+        // Fechar modal ao clicar fora da caixa
+        document.getElementById('modalRelatorio').addEventListener('click', function(e) {
+            if (e.target === this) {
+                fecharModalRelatorio();
+            }
+        });
+    </script>
 
 </body>
 </html>

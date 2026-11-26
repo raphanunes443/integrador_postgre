@@ -1,7 +1,7 @@
 <?php
 // ============================================================
-// ARQUIVO: painel_coordenador.php 
-// FUNÇÃO: Painel do Coordenador - Gestão de Aulas e Progresso
+// ARQUIVO: MAPA/relatorio.php (ou RELATORIOS/relatorio_ocupacao.php)
+// FUNÇÃO: Relatorio de Ocupação - Gestão de Aulas e Progresso
 // ============================================================
 
 require_once __DIR__ . '/../conexao_banco.php';
@@ -16,13 +16,11 @@ if (session_status() === PHP_SESSION_NONE) {
 // ============================================================
 // VERIFICAR PERMISSÃO DE ACESSO 
 // ============================================================
-// Tipos permitidos: admin_cliente, gerente 
 if (!isLoggedIn()) {
     setMessage('error', 'Você precisa estar logado para acessar esta página.');
     redirect('../AUTENTIFICACAO_ACESSO/realizar_login.php');
 }
 
-// Verificar se tem permissão (admin_cliente ou gerente)
 $tipos_permitidos = ['admin_cliente', 'gerente'];
 if (!in_array($_SESSION['tipo_usuario'] ?? '', $tipos_permitidos)) {
     setMessage('error', 'Você não tem permissão para acessar esta página.');
@@ -30,13 +28,24 @@ if (!in_array($_SESSION['tipo_usuario'] ?? '', $tipos_permitidos)) {
 }
 
 // ============================================================
-// VARIÁVEIS DE PERMISSÃO 
+// VARIÁVEIS DE PERMISSÃO E DEFINIÇÃO DA UNIDADE
 // ============================================================
 $id_cliente = getClienteId();
 $id_usuario = getUsuarioId();
 $tipo_usuario = $_SESSION['tipo_usuario'] ?? '';
 $nome_cliente = $_SESSION['nome_cliente'] ?? '';
-$id_unidade = $_SESSION['usuario_unidade'] ?? 0; // Mantido para compatibilidade
+
+// Pega o ID da unidade via URL (GET). Se não tiver, usa o da sessão.
+$id_unidade = isset($_GET['id_unidade']) ? (int)$_GET['id_unidade'] : ($_SESSION['usuario_unidade'] ?? 0);
+
+// Validação de segurança: O coordenador só pode ver a unidade dele.
+if ($tipo_usuario === 'gerente') {
+    $id_unidade_sessao = $_SESSION['usuario_unidade'] ?? 0;
+    if ($id_unidade !== $id_unidade_sessao) {
+        setMessage('error', 'Você não tem permissão para acessar o relatório de outra unidade.');
+        redirect('dashboard.php');
+    }
+}
 
 // Se não tiver unidade definida, buscar a primeira unidade do cliente
 if ($id_unidade == 0) {
@@ -46,16 +55,14 @@ if ($id_unidade == 0) {
         $unidade = $stmt->fetch();
         if ($unidade) {
             $id_unidade = $unidade['id_unidade'];
-            $_SESSION['usuario_unidade'] = $id_unidade;
         }
     } catch (PDOException $e) {
         $id_unidade = 0;
     }
 }
 
-$nome_unidade = '';
-
-// Buscar nome da unidade do coordenador
+// Buscar nome da unidade
+$nome_unidade = 'Unidade não definida';
 try {
     $sql_unidade = "SELECT nome_unidade FROM unidades WHERE id_unidade = :id AND id_cliente = :id_cliente";
     $stmt = $conn->prepare($sql_unidade);
@@ -77,31 +84,20 @@ $tipo_mensagem = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['acao'])) {
     $acao = $_POST['acao'];
     
-    // MARCAR AULAS SELECIONADAS COMO CONCLUÍDAS
     if ($acao === 'marcar_concluidas' && isset($_POST['aulas_selecionadas'])) {
         $aulas_ids = $_POST['aulas_selecionadas'];
         if (!empty($aulas_ids)) {
             try {
                 $conn->beginTransaction();
-                
-                // Usar apenas parâmetros 
                 $placeholders = implode(',', array_fill(0, count($aulas_ids), '?'));
                 
-                // Buscar cursos afetados
                 $sql_cursos = "SELECT DISTINCT id_curso FROM cronograma WHERE id_aula IN ($placeholders) AND id_cliente = ?";
                 $stmt_cursos = $conn->prepare($sql_cursos);
                 $params_cursos = array_merge($aulas_ids, [$id_cliente]);
                 $stmt_cursos->execute($params_cursos);
                 $cursos_afetados = $stmt_cursos->fetchAll(PDO::FETCH_COLUMN);
                 
-                // Atualizar aulas
-                $sql = "UPDATE cronograma 
-                    SET status_aula = 'realizada', 
-                        observacao = CONCAT(COALESCE(observacao, ''), ' | Marcada como concluída em ', NOW())
-                    WHERE id_aula IN ($placeholders)
-                    AND id_cliente = ?
-                    AND id_unidade = ?";
-                
+                $sql = "UPDATE cronograma SET status_aula = 'realizada', observacao = CONCAT(IFNULL(observacao, ''), ' | Marcada como concluída em ', NOW()) WHERE id_aula IN ($placeholders) AND id_cliente = ? AND id_unidade = ?";
                 $stmt = $conn->prepare($sql);
                 $params = array_merge($aulas_ids, [$id_cliente, $id_unidade]);
                 $stmt->execute($params);
@@ -110,7 +106,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['acao'])) {
                 foreach ($cursos_afetados as $id_curso) {
                     atualizarPercentualCurso($conn, $id_curso, $id_cliente, $id_unidade);
                 }
-                
                 $conn->commit();
                 $mensagem = "$qtd aula(s) marcada(s) como concluída(s) com sucesso!";
                 $tipo_mensagem = 'success';
@@ -119,107 +114,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['acao'])) {
                 $mensagem = 'Erro ao marcar aulas: ' . $e->getMessage();
                 $tipo_mensagem = 'danger';
             }
-        } else {
-            $mensagem = 'Nenhuma aula selecionada.';
-            $tipo_mensagem = 'warning';
-        }
-    }
-    
-    // MARCAR TODAS AS AULAS DO DIA COMO CONCLUÍDAS
-    elseif ($acao === 'marcar_todas_dia') {
-        try {
-            $data_atual = date('Y-m-d');
-            
-            $conn->beginTransaction();
-            
-            // Buscar cursos afetados
-            $sql_cursos = "SELECT DISTINCT id_curso FROM cronograma 
-                           WHERE data_aula = :data 
-                           AND status_aula = 'agendada'
-                           AND id_cliente = :id_cliente
-                           AND id_unidade = :id_unidade";
-            $stmt_cursos = $conn->prepare($sql_cursos);
-            $stmt_cursos->execute([
-                ':data' => $data_atual,
-                ':id_cliente' => $id_cliente,
-                ':id_unidade' => $id_unidade
-            ]);
-            $cursos_afetados = $stmt_cursos->fetchAll(PDO::FETCH_COLUMN);
-            
-            // Atualizar aulas
-            $sql = "UPDATE cronograma 
-                    SET status_aula = 'realizada',
-                        observacao = CONCAT(COALESCE(observacao, ''), ' | Todas as aulas do dia marcadas como concluídas em ', NOW())
-                    WHERE data_aula = :data 
-                    AND status_aula = 'agendada'
-                    AND id_cliente = :id_cliente
-                    AND id_unidade = :id_unidade";
-            $stmt = $conn->prepare($sql);
-            $stmt->execute([
-                ':data' => $data_atual,
-                ':id_cliente' => $id_cliente,
-                ':id_unidade' => $id_unidade
-            ]);
-            $qtd = $stmt->rowCount();
-            
-            foreach ($cursos_afetados as $id_curso) {
-                atualizarPercentualCurso($conn, $id_curso, $id_cliente, $id_unidade);
-            }
-            
-            $conn->commit();
-            $mensagem = "$qtd aula(s) do dia marcada(s) como concluída(s) com sucesso!";
-            $tipo_mensagem = 'success';
-        } catch (PDOException $e) {
-            $conn->rollBack();
-            $mensagem = 'Erro ao marcar aulas: ' . $e->getMessage();
-            $tipo_mensagem = 'danger';
-        }
-    }
-    
-    // MARCAR AULAS ANTERIORES COMO CONCLUÍDAS
-    elseif ($acao === 'marcar_anteriores_concluidas' && isset($_POST['aulas_anteriores_selecionadas'])) {
-        $aulas_ids = $_POST['aulas_anteriores_selecionadas'];
-        if (!empty($aulas_ids)) {
-            try {
-                $conn->beginTransaction();
-                
-                $placeholders = implode(',', array_fill(0, count($aulas_ids), '?'));
-                
-                // Buscar cursos afetados
-                $sql_cursos = "SELECT DISTINCT id_curso FROM cronograma WHERE id_aula IN ($placeholders) AND id_cliente = ?";
-                $stmt_cursos = $conn->prepare($sql_cursos);
-                $params_cursos = array_merge($aulas_ids, [$id_cliente]);
-                $stmt_cursos->execute($params_cursos);
-                $cursos_afetados = $stmt_cursos->fetchAll(PDO::FETCH_COLUMN);
-                
-                // Atualizar aulas
-                $sql = "UPDATE cronograma 
-                        SET status_aula = 'realizada', 
-                            observacao = CONCAT(COALESCE(observacao, ''), ' | Marcada como concluída retroativamente em ', NOW())
-                        WHERE id_aula IN ($placeholders)
-                        AND id_cliente = ?
-                        AND id_unidade = ?";
-                
-                $stmt = $conn->prepare($sql);
-                $params = array_merge($aulas_ids, [$id_cliente, $id_unidade]);
-                $stmt->execute($params);
-                $qtd = $stmt->rowCount();
-                
-                foreach ($cursos_afetados as $id_curso) {
-                    atualizarPercentualCurso($conn, $id_curso, $id_cliente, $id_unidade);
-                }
-                
-                $conn->commit();
-                $mensagem = "$qtd aula(s) anteriores marcada(s) como concluída(s) com sucesso!";
-                $tipo_mensagem = 'success';
-            } catch (PDOException $e) {
-                $conn->rollBack();
-                $mensagem = 'Erro ao marcar aulas: ' . $e->getMessage();
-                $tipo_mensagem = 'danger';
-            }
-        } else {
-            $mensagem = 'Nenhuma aula anterior selecionada.';
-            $tipo_mensagem = 'warning';
         }
     }
 }
@@ -229,46 +123,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['acao'])) {
 // ============================================================
 function atualizarPercentualCurso($conn, $id_curso, $id_cliente, $id_unidade) {
     try {
-        $sql_total = "SELECT COUNT(*) FROM cronograma 
-                      WHERE id_curso = :id_curso 
-                      AND id_cliente = :id_cliente
-                      AND id_unidade = :id_unidade";
+        $sql_total = "SELECT COUNT(*) FROM cronograma WHERE id_curso = :id_curso AND id_cliente = :id_cliente AND id_unidade = :id_unidade";
         $stmt = $conn->prepare($sql_total);
-        $stmt->execute([
-            ':id_curso' => $id_curso,
-            ':id_cliente' => $id_cliente,
-            ':id_unidade' => $id_unidade
-        ]);
+        $stmt->execute([':id_curso' => $id_curso, ':id_cliente' => $id_cliente, ':id_unidade' => $id_unidade]);
         $total_aulas = (int)$stmt->fetchColumn();
         
-        $sql_realizadas = "SELECT COUNT(*) FROM cronograma 
-                           WHERE id_curso = :id_curso 
-                           AND status_aula = 'realizada'
-                           AND id_cliente = :id_cliente
-                           AND id_unidade = :id_unidade";
+        $sql_realizadas = "SELECT COUNT(*) FROM cronograma WHERE id_curso = :id_curso AND status_aula = 'realizada' AND id_cliente = :id_cliente AND id_unidade = :id_unidade";
         $stmt = $conn->prepare($sql_realizadas);
-        $stmt->execute([
-            ':id_curso' => $id_curso,
-            ':id_cliente' => $id_cliente,
-            ':id_unidade' => $id_unidade
-        ]);
+        $stmt->execute([':id_curso' => $id_curso, ':id_cliente' => $id_cliente, ':id_unidade' => $id_unidade]);
         $aulas_realizadas = (int)$stmt->fetchColumn();
         
-        if ($total_aulas > 0) {
-            $percentual = round(($aulas_realizadas / $total_aulas) * 100, 2);
-        } else {
-            $percentual = 0;
-        }
+        $percentual = ($total_aulas > 0) ? round(($aulas_realizadas / $total_aulas) * 100, 2) : 0;
         
-        $sql_update = "UPDATE cursos SET percentual_conclusao = :percentual 
-                       WHERE id_curso = :id_curso 
-                       AND id_cliente = :id_cliente";
+        $sql_update = "UPDATE cursos SET percentual_conclusao = :percentual WHERE id_curso = :id_curso AND id_cliente = :id_cliente";
         $stmt = $conn->prepare($sql_update);
-        $stmt->execute([
-            ':percentual' => $percentual,
-            ':id_curso' => $id_curso,
-            ':id_cliente' => $id_cliente
-        ]);
+        $stmt->execute([':percentual' => $percentual, ':id_curso' => $id_curso, ':id_cliente' => $id_cliente]);
         
         return true;
     } catch (PDOException $e) {
@@ -277,7 +146,7 @@ function atualizarPercentualCurso($conn, $id_curso, $id_cliente, $id_unidade) {
 }
 
 // ============================================================
-// INICIALIZAR VARIÁVEIS
+// BUSCAR DADOS DO BANCO - FILTRADOS POR CLIENTE E UNIDADE
 // ============================================================
 $total_hoje = 0;
 $concluidas_hoje = 0;
@@ -287,141 +156,71 @@ $cursos_ativos = [];
 $cursos_para_concluir = [];
 $aulas_aguardando = [];
 $aulas_anteriores_pendentes = [];
+$total_salas = 0;
+$salas_disponiveis = 0;
+$salas_ocupadas = 0;
+$salas_manutencao = 0;
+$salas_inativas = 0;
+$perc_disponiveis = 0;
+$perc_ocupadas = 0;
+$perc_manutencao = 0;
+$perc_inativas = 0;
 
-// ============================================================
-// BUSCAR DADOS DO BANCO - FILTRADOS POR CLIENTE E UNIDADE
-// ============================================================
 try {
     $data_atual = date('Y-m-d');
     $data_hoje = date('d/m/Y');
     
-    // ============================================================
-    // 1. RESUMO RÁPIDO - FILTRADO POR CLIENTE E UNIDADE
-    // ============================================================
-    $sql_total_hoje = "SELECT COUNT(*) as total FROM cronograma 
-                       WHERE data_aula = :data 
-                       AND id_cliente = :id_cliente 
-                       AND id_unidade = :id_unidade";
+    // 1. RESUMO RÁPIDO
+    $sql_total_hoje = "SELECT COUNT(*) as total FROM cronograma WHERE data_aula = :data AND id_cliente = :id_cliente AND id_unidade = :id_unidade";
     $stmt = $conn->prepare($sql_total_hoje);
-    $stmt->execute([
-        ':data' => $data_atual,
-        ':id_cliente' => $id_cliente,
-        ':id_unidade' => $id_unidade
-    ]);
+    $stmt->execute([':data' => $data_atual, ':id_cliente' => $id_cliente, ':id_unidade' => $id_unidade]);
     $total_hoje = (int)$stmt->fetchColumn();
     
-    $sql_concluidas_hoje = "SELECT COUNT(*) as total FROM cronograma 
-                            WHERE data_aula = :data 
-                            AND status_aula = 'realizada' 
-                            AND id_cliente = :id_cliente
-                            AND id_unidade = :id_unidade";
+    $sql_concluidas_hoje = "SELECT COUNT(*) as total FROM cronograma WHERE data_aula = :data AND status_aula = 'realizada' AND id_cliente = :id_cliente AND id_unidade = :id_unidade";
     $stmt = $conn->prepare($sql_concluidas_hoje);
-    $stmt->execute([
-        ':data' => $data_atual,
-        ':id_cliente' => $id_cliente,
-        ':id_unidade' => $id_unidade
-    ]);
+    $stmt->execute([':data' => $data_atual, ':id_cliente' => $id_cliente, ':id_unidade' => $id_unidade]);
     $concluidas_hoje = (int)$stmt->fetchColumn();
-    
     $pendentes_hoje = $total_hoje - $concluidas_hoje;
     
-    // ============================================================
-    // 2. AULAS DO DIA - FILTRADO POR CLIENTE E UNIDADE
-    // ============================================================
-    $sql_aulas = "SELECT c.*, 
-                         cu.nome_curso,
-                         cu.numero_curso,
-                         f.nome_funcionario AS nome_professor,
-                         s.numero_sala
+    // 2. AULAS DO DIA
+    $sql_aulas = "SELECT c.*, cu.nome_curso, cu.numero_curso, f.nome_funcionario AS nome_professor, s.numero_sala
                   FROM cronograma c
                   LEFT JOIN cursos cu ON c.id_curso = cu.id_curso AND cu.id_cliente = c.id_cliente
                   LEFT JOIN funcionarios f ON c.id_professor = f.id_funcionario AND f.id_cliente = c.id_cliente
                   LEFT JOIN salas s ON c.id_sala = s.id_sala AND s.id_cliente = c.id_cliente
-                  WHERE c.data_aula = :data 
-                  AND c.id_cliente = :id_cliente
-                  AND c.id_unidade = :id_unidade
+                  WHERE c.data_aula = :data AND c.id_cliente = :id_cliente AND c.id_unidade = :id_unidade
                   ORDER BY c.horario_inicio ASC, c.id_aula ASC";
-    
     $stmt = $conn->prepare($sql_aulas);
-    $stmt->execute([
-        ':data' => $data_atual,
-        ':id_cliente' => $id_cliente,
-        ':id_unidade' => $id_unidade
-    ]);
+    $stmt->execute([':data' => $data_atual, ':id_cliente' => $id_cliente, ':id_unidade' => $id_unidade]);
     $aulas_hoje = $stmt->fetchAll();
     
-    // ============================================================
     // 3. PROGRESSO DOS CURSOS
-    // ============================================================
-    $sql_cursos = "SELECT 
-                        c.id_curso,
-                        c.numero_curso,
-                        c.nome_curso,
-                        c.status_curso,
-                        c.id_unidade,
-                        c.percentual_conclusao,
-                        c.id_docente
-                    FROM cursos c
-                    WHERE c.status_curso = 'ativo'
-                    AND c.id_cliente = :id_cliente
-                    AND c.id_unidade = :id_unidade
-                    ORDER BY c.nome_curso ASC";
-    
+    $sql_cursos = "SELECT c.id_curso, c.numero_curso, c.nome_curso, c.status_curso, c.id_unidade, c.percentual_conclusao, c.id_docente
+                   FROM cursos c WHERE c.status_curso = 'ativo' AND c.id_cliente = :id_cliente AND c.id_unidade = :id_unidade ORDER BY c.nome_curso ASC";
     $stmt = $conn->prepare($sql_cursos);
-    $stmt->execute([
-        ':id_cliente' => $id_cliente,
-        ':id_unidade' => $id_unidade
-    ]);
+    $stmt->execute([':id_cliente' => $id_cliente, ':id_unidade' => $id_unidade]);
     $cursos_raw = $stmt->fetchAll();
     
-    $cursos_ativos = [];
     foreach ($cursos_raw as $curso) {
         $nome_professor = 'Não definido';
         if (!empty($curso['id_docente'])) {
-            $sql_prof = "SELECT nome_funcionario FROM funcionarios 
-                         WHERE id_funcionario = :id_docente 
-                         AND id_cliente = :id_cliente";
+            $sql_prof = "SELECT nome_funcionario FROM funcionarios WHERE id_funcionario = :id_docente AND id_cliente = :id_cliente";
             $stmt_prof = $conn->prepare($sql_prof);
-            $stmt_prof->execute([
-                ':id_docente' => $curso['id_docente'],
-                ':id_cliente' => $id_cliente
-            ]);
-            $nome_professor = $stmt_prof->fetchColumn();
-            if (!$nome_professor) {
-                $nome_professor = 'Não definido';
-            }
+            $stmt_prof->execute([':id_docente' => $curso['id_docente'], ':id_cliente' => $id_cliente]);
+            $nome_professor = $stmt_prof->fetchColumn() ?: 'Não definido';
         }
         
-        $sql_total_aulas = "SELECT COUNT(*) FROM cronograma 
-                            WHERE id_curso = :id_curso 
-                            AND id_cliente = :id_cliente
-                            AND id_unidade = :id_unidade";
+        $sql_total_aulas = "SELECT COUNT(*) FROM cronograma WHERE id_curso = :id_curso AND id_cliente = :id_cliente AND id_unidade = :id_unidade";
         $stmt_total = $conn->prepare($sql_total_aulas);
-        $stmt_total->execute([
-            ':id_curso' => $curso['id_curso'],
-            ':id_cliente' => $id_cliente,
-            ':id_unidade' => $id_unidade
-        ]);
+        $stmt_total->execute([':id_curso' => $curso['id_curso'], ':id_cliente' => $id_cliente, ':id_unidade' => $id_unidade]);
         $total_aulas = (int)$stmt_total->fetchColumn();
         
-        $sql_realizadas = "SELECT COUNT(*) FROM cronograma 
-                           WHERE id_curso = :id_curso 
-                           AND status_aula = 'realizada'
-                           AND id_cliente = :id_cliente
-                           AND id_unidade = :id_unidade";
+        $sql_realizadas = "SELECT COUNT(*) FROM cronograma WHERE id_curso = :id_curso AND status_aula = 'realizada' AND id_cliente = :id_cliente AND id_unidade = :id_unidade";
         $stmt_realizadas = $conn->prepare($sql_realizadas);
-        $stmt_realizadas->execute([
-            ':id_curso' => $curso['id_curso'],
-            ':id_cliente' => $id_cliente,
-            ':id_unidade' => $id_unidade
-        ]);
+        $stmt_realizadas->execute([':id_curso' => $curso['id_curso'], ':id_cliente' => $id_cliente, ':id_unidade' => $id_unidade]);
         $aulas_realizadas = (int)$stmt_realizadas->fetchColumn();
         
-        if ($total_aulas > 0) {
-            $percentual = round(($aulas_realizadas / $total_aulas) * 100, 2);
-        } else {
-            $percentual = 0;
-        }
+        $percentual = ($total_aulas > 0) ? round(($aulas_realizadas / $total_aulas) * 100, 2) : 0;
         
         $cursos_ativos[] = [
             'id_curso' => $curso['id_curso'],
@@ -437,82 +236,62 @@ try {
         ];
     }
     
-    // ============================================================
     // 4. CURSOS COM 100% PARA CONCLUIR
-    // ============================================================
     $cursos_para_concluir = array_filter($cursos_ativos, function($c) {
         return $c['percentual'] >= 100 && $c['total_aulas'] > 0;
     });
     
-    // ============================================================
     // 5. AULAS AGUARDANDO REMARCAÇÃO
-    // ============================================================
-    $sql_aulas_aguardando = "SELECT c.*, 
-                                     cu.nome_curso,
-                                     cu.numero_curso,
-                                     cu.status_curso,
-                                     f.nome_funcionario AS nome_professor,
-                                     s.numero_sala,
-                                     u.nome_unidade
+    $sql_aulas_aguardando = "SELECT c.*, cu.nome_curso, cu.numero_curso, cu.status_curso, f.nome_funcionario AS nome_professor, s.numero_sala, u.nome_unidade
                               FROM cronograma c
                               LEFT JOIN cursos cu ON c.id_curso = cu.id_curso AND cu.id_cliente = c.id_cliente
                               LEFT JOIN funcionarios f ON c.id_professor = f.id_funcionario AND f.id_cliente = c.id_cliente
                               LEFT JOIN salas s ON c.id_sala = s.id_sala AND s.id_cliente = c.id_cliente
                               LEFT JOIN unidades u ON c.id_unidade = u.id_unidade AND u.id_cliente = c.id_cliente
-                              WHERE c.status_aula = 'aguardando_remarcacao'
-                              AND cu.status_curso = 'ativo'
-                              AND c.id_cliente = :id_cliente
-                              AND c.id_unidade = :id_unidade
+                              WHERE c.status_aula = 'aguardando_remarcacao' AND cu.status_curso = 'ativo' AND c.id_cliente = :id_cliente AND c.id_unidade = :id_unidade
                               ORDER BY c.data_aula ASC, c.horario_inicio ASC";
-    
     $stmt = $conn->prepare($sql_aulas_aguardando);
-    $stmt->execute([
-        ':id_cliente' => $id_cliente,
-        ':id_unidade' => $id_unidade
-    ]);
+    $stmt->execute([':id_cliente' => $id_cliente, ':id_unidade' => $id_unidade]);
     $aulas_aguardando = $stmt->fetchAll();
     
-    // ============================================================
     // 6. AULAS ANTERIORES NÃO CONCLUÍDAS
-    // ============================================================
-    $sql_aulas_anteriores = "SELECT c.*, 
-                                    cu.nome_curso,
-                                    cu.numero_curso,
-                                    cu.status_curso,
-                                    f.nome_funcionario AS nome_professor,
-                                    s.numero_sala,
-                                    u.nome_unidade
+    $sql_aulas_anteriores = "SELECT c.*, cu.nome_curso, cu.numero_curso, cu.status_curso, f.nome_funcionario AS nome_professor, s.numero_sala, u.nome_unidade
                              FROM cronograma c
                              LEFT JOIN cursos cu ON c.id_curso = cu.id_curso AND cu.id_cliente = c.id_cliente
                              LEFT JOIN funcionarios f ON c.id_professor = f.id_funcionario AND f.id_cliente = c.id_cliente
                              LEFT JOIN salas s ON c.id_sala = s.id_sala AND s.id_cliente = c.id_cliente
                              LEFT JOIN unidades u ON c.id_unidade = u.id_unidade AND u.id_cliente = c.id_cliente
-                             WHERE c.data_aula < :data_atual
-                               AND c.status_aula NOT IN ('realizada', 'cancelada')
-                               AND c.id_cliente = :id_cliente
-                               AND c.id_unidade = :id_unidade
-                               AND cu.status_curso = 'ativo'
+                             WHERE c.data_aula < :data_atual AND c.status_aula NOT IN ('realizada', 'cancelada') AND c.id_cliente = :id_cliente AND c.id_unidade = :id_unidade AND cu.status_curso = 'ativo'
                              ORDER BY c.data_aula DESC, c.horario_inicio DESC";
-    
     $stmt = $conn->prepare($sql_aulas_anteriores);
-    $stmt->execute([
-        ':data_atual' => date('Y-m-d'),
-        ':id_cliente' => $id_cliente,
-        ':id_unidade' => $id_unidade
-    ]);
+    $stmt->execute([':data_atual' => date('Y-m-d'), ':id_cliente' => $id_cliente, ':id_unidade' => $id_unidade]);
     $aulas_anteriores_pendentes = $stmt->fetchAll();
+
+    // 7. DADOS PARA O GRÁFICO DE OCUPAÇÃO DE SALAS
+    $sql_salas = "SELECT status_sala, COUNT(*) as qtd FROM salas WHERE id_cliente = :id_cliente AND id_unidade = :id_unidade GROUP BY status_sala";
+    $stmt_salas = $conn->prepare($sql_salas);
+    $stmt_salas->execute([':id_cliente' => $id_cliente, ':id_unidade' => $id_unidade]);
+    $salas_status = $stmt_salas->fetchAll(PDO::FETCH_KEY_PAIR);
+
+    $salas_disponiveis = $salas_status['disponivel'] ?? 0;
+    $salas_ocupadas = $salas_status['ocupada'] ?? 0;
+    $salas_manutencao = $salas_status['manutencao'] ?? 0;
+    $salas_inativas = $salas_status['inativa'] ?? 0;
+    $total_salas = $salas_disponiveis + $salas_ocupadas + $salas_manutencao + $salas_inativas;
+
+    if ($total_salas > 0) {
+        $perc_disponiveis = round(($salas_disponiveis / $total_salas) * 100, 1);
+        $perc_ocupadas = round(($salas_ocupadas / $total_salas) * 100, 1);
+        $perc_manutencao = round(($salas_manutencao / $total_salas) * 100, 1);
+        $perc_inativas = round(($salas_inativas / $total_salas) * 100, 1);
+    }
     
 } catch (PDOException $e) {
     $mensagem = 'Erro ao carregar dados: ' . $e->getMessage();
     $tipo_mensagem = 'danger';
-    $aulas_hoje = [];
-    $cursos_ativos = [];
-    $cursos_para_concluir = [];
-    $aulas_aguardando = [];
-    $aulas_anteriores_pendentes = [];
 }
 
-$titulo = 'Painel do Coordenador - Gerenciamento de Ambientes';
+$titulo = 'Relatório de Ocupação - ' . $nome_unidade;
 ?>
 <!DOCTYPE html>
 <html lang="pt-BR">
@@ -525,6 +304,8 @@ $titulo = 'Painel do Coordenador - Gerenciamento de Ambientes';
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
     <!-- Google Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet"/>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
     <style>
         /* ======================================================
@@ -586,9 +367,7 @@ $titulo = 'Painel do Coordenador - Gerenciamento de Ambientes';
             font-weight: 700;
             color: #1a2639;
         }
-        .logo-text span {
-            color: #1a73e8;
-        }
+        .logo-text span { color: #1a73e8; }
         .logo-text small {
             display: block;
             font-size: 11px;
@@ -633,22 +412,15 @@ $titulo = 'Painel do Coordenador - Gerenciamento de Ambientes';
             transition: color 0.15s;
         }
 
-        .menu-item:hover {
-            background: #f0f6ff;
-            color: #1a2639;
-        }
-        .menu-item:hover i {
-            color: #1a73e8;
-        }
+        .menu-item:hover { background: #f0f6ff; color: #1a2639; }
+        .menu-item:hover i { color: #1a73e8; }
 
         .menu-item.active {
             background: #1a73e8;
             color: #ffffff;
             box-shadow: 0 4px 12px rgba(26, 115, 232, 0.3);
         }
-        .menu-item.active i {
-            color: #ffffff;
-        }
+        .menu-item.active i { color: #ffffff; }
 
         .menu-item .badge-menu {
             margin-left: auto;
@@ -689,18 +461,9 @@ $titulo = 'Painel do Coordenador - Gerenciamento de Ambientes';
             color: #2d3a4f;
         }
 
-        .user-info {
-            line-height: 1.3;
-        }
-        .user-info .name {
-            font-weight: 600;
-            font-size: 13px;
-            color: #1a2639;
-        }
-        .user-info .role {
-            font-size: 12px;
-            color: #8a9bb5;
-        }
+        .user-info { line-height: 1.3; }
+        .user-info .name { font-weight: 600; font-size: 13px; color: #1a2639; }
+        .user-info .role { font-size: 12px; color: #8a9bb5; }
 
         .status-dot {
             display: inline-block;
@@ -764,18 +527,9 @@ $titulo = 'Painel do Coordenador - Gerenciamento de Ambientes';
             color: #0e1a2b;
             margin-bottom: 6px;
         }
-        .page-title i {
-            color: #1a73e8;
-            margin-right: 10px;
-        }
-        .page-subtitle {
-            font-size: 14px;
-            color: #7a8aa0;
-            margin-bottom: 0;
-        }
-        .page-subtitle strong {
-            color: #1a73e8;
-        }
+        .page-title i { color: #1a73e8; margin-right: 10px; }
+        .page-subtitle { font-size: 14px; color: #7a8aa0; margin-bottom: 0; }
+        .page-subtitle strong { color: #1a73e8; }
 
         .header-actions {
             display: flex;
@@ -795,24 +549,10 @@ $titulo = 'Painel do Coordenador - Gerenciamento de Ambientes';
             gap: 8px;
             border: 1px solid transparent;
         }
-        .alert-success {
-            background: #e6f7e9;
-            color: #1e8546;
-            border-color: #c8f0cf;
-        }
-        .alert-danger {
-            background: #ffe9e9;
-            color: #b33a3a;
-            border-color: #ffd6d6;
-        }
-        .alert-warning {
-            background: #fff3cd;
-            color: #856404;
-            border-color: #ffc107;
-        }
-        .alert i {
-            font-size: 18px;
-        }
+        .alert-success { background: #e6f7e9; color: #1e8546; border-color: #c8f0cf; }
+        .alert-danger { background: #ffe9e9; color: #b33a3a; border-color: #ffd6d6; }
+        .alert-warning { background: #fff3cd; color: #856404; border-color: #ffc107; }
+        .alert i { font-size: 18px; }
 
         .btn {
             padding: 9px 20px;
@@ -838,43 +578,18 @@ $titulo = 'Painel do Coordenador - Gerenciamento de Ambientes';
             border: none;
             box-shadow: 0 6px 16px -4px rgba(26, 115, 232, 0.35);
         }
-        .btn-primary:hover {
-            background: #1557b0;
-            transform: translateY(-1px);
-        }
+        .btn-primary:hover { background: #1557b0; transform: translateY(-1px); }
 
-        .btn-success {
-            background: #34a853;
-            color: #ffffff;
-            border: none;
-        }
-        .btn-success:hover {
-            background: #2d9248;
-            transform: translateY(-1px);
-        }
+        .btn-success { background: #34a853; color: #ffffff; border: none; }
+        .btn-success:hover { background: #2d9248; transform: translateY(-1px); }
 
-        .btn-danger {
-            background: #dc3545;
-            color: #ffffff;
-            border: none;
-        }
-        .btn-danger:hover {
-            background: #c82333;
-        }
+        .btn-danger { background: #dc3545; color: #ffffff; border: none; }
+        .btn-danger:hover { background: #c82333; }
 
-        .btn-warning {
-            background: #f9ab00;
-            color: #ffffff;
-            border: none;
-        }
-        .btn-warning:hover {
-            background: #e09a00;
-        }
+        .btn-warning { background: #f9ab00; color: #ffffff; border: none; }
+        .btn-warning:hover { background: #e09a00; }
 
-        .btn-sm {
-            padding: 6px 14px;
-            font-size: 12px;
-        }
+        .btn-sm { padding: 6px 14px; font-size: 12px; }
 
         .resumo-grid {
             display: grid;
@@ -893,13 +608,10 @@ $titulo = 'Painel do Coordenador - Gerenciamento de Ambientes';
             gap: 16px;
             transition: all 0.2s;
         }
-        .resumo-card:hover {
-            box-shadow: 0 4px 16px rgba(0,0,0,0.06);
-        }
+        .resumo-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.06); }
 
         .resumo-card .icon {
-            width: 48px;
-            height: 48px;
+            width: 48px; height: 48px;
             border-radius: 12px;
             display: flex;
             align-items: center;
@@ -907,41 +619,58 @@ $titulo = 'Painel do Coordenador - Gerenciamento de Ambientes';
             font-size: 22px;
             flex-shrink: 0;
         }
-        .resumo-card .icon.blue {
-            background: #e8f0fe;
-            color: #1a73e8;
-        }
-        .resumo-card .icon.green {
-            background: #e6f7e9;
-            color: #34a853;
-        }
-        .resumo-card .icon.orange {
-            background: #fff3e0;
-            color: #f9ab00;
-        }
-        .resumo-card .icon.red {
-            background: #ffe9e9;
-            color: #dc3545;
-        }
-        .resumo-card .icon.purple {
-            background: #f3e5f5;
-            color: #7b1fa2;
-        }
+        .resumo-card .icon.blue { background: #e8f0fe; color: #1a73e8; }
+        .resumo-card .icon.green { background: #e6f7e9; color: #34a853; }
+        .resumo-card .icon.orange { background: #fff3e0; color: #f9ab00; }
+        .resumo-card .icon.red { background: #ffe9e9; color: #dc3545; }
+        .resumo-card .icon.purple { background: #f3e5f5; color: #7b1fa2; }
 
-        .resumo-card .info {
-            flex: 1;
+        .resumo-card .info { flex: 1; }
+        .resumo-card .info .number { font-size: 24px; font-weight: 700; color: #0e1a2b; line-height: 1.2; }
+        .resumo-card .info .label { font-size: 13px; color: #7a8aa0; font-weight: 500; }
+
+        /* ======================================================
+           GRÁFICO DE OCUPAÇÃO
+        ====================================================== */
+        .grafico-ocupacao-section {
+            background: #ffffff;
+            border-radius: 16px;
+            border: 1px solid #ebf0f8;
+            padding: 24px 28px;
+            margin-bottom: 28px;
         }
-        .resumo-card .info .number {
-            font-size: 24px;
-            font-weight: 700;
+        .grafico-ocupacao-section .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+        .grafico-ocupacao-section .section-header h3 {
+            font-size: 16px;
+            font-weight: 600;
             color: #0e1a2b;
-            line-height: 1.2;
         }
-        .resumo-card .info .label {
+        .grafico-ocupacao-section .section-header h3 i { color: #1a73e8; margin-right: 8px; }
+        .chart-container {
+            position: relative;
+            height: 250px;
+            width: 100%;
+            max-width: 500px;
+            margin: 0 auto;
+        }
+        .chart-legend {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+            flex-wrap: wrap;
+            margin-top: 16px;
             font-size: 13px;
-            color: #7a8aa0;
-            font-weight: 500;
+            color: #5a6a7e;
         }
+        .chart-legend span { display: flex; align-items: center; gap: 6px; font-weight: 500; }
+        .chart-legend .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
 
         .section {
             background: #ffffff;
@@ -960,37 +689,18 @@ $titulo = 'Painel do Coordenador - Gerenciamento de Ambientes';
             gap: 12px;
         }
 
-        .section-header h3 {
-            font-size: 16px;
-            font-weight: 600;
-            color: #0e1a2b;
-        }
-        .section-header h3 i {
-            color: #1a73e8;
-            margin-right: 8px;
-        }
+        .section-header h3 { font-size: 16px; font-weight: 600; color: #0e1a2b; }
+        .section-header h3 i { color: #1a73e8; margin-right: 8px; }
 
         .section-header .badge-count {
-            background: #1a73e8;
-            color: #fff;
-            padding: 2px 10px;
-            border-radius: 60px;
-            font-size: 12px;
-            font-weight: 600;
+            background: #1a73e8; color: #fff; padding: 2px 10px;
+            border-radius: 60px; font-size: 12px; font-weight: 600;
         }
-        .section-header .badge-count.success {
-            background: #34a853;
-        }
-        .section-header .badge-count.warning {
-            background: #f9ab00;
-        }
-        .section-header .badge-count.danger {
-            background: #dc3545;
-        }
+        .section-header .badge-count.success { background: #34a853; }
+        .section-header .badge-count.warning { background: #f9ab00; }
+        .section-header .badge-count.danger { background: #dc3545; }
 
-        .table-wrapper {
-            overflow-x: auto;
-        }
+        .table-wrapper { overflow-x: auto; }
 
         .table {
             width: 100%;
@@ -998,10 +708,7 @@ $titulo = 'Painel do Coordenador - Gerenciamento de Ambientes';
             font-size: 13px;
         }
 
-        .table thead {
-            background: #f9fbfe;
-            border-bottom: 2px solid #eef3fa;
-        }
+        .table thead { background: #f9fbfe; border-bottom: 2px solid #eef3fa; }
 
         .table th {
             text-align: left;
@@ -1021,22 +728,12 @@ $titulo = 'Painel do Coordenador - Gerenciamento de Ambientes';
             vertical-align: middle;
         }
 
-        .table tbody tr:hover {
-            background: #fafcff;
-        }
-        .table tbody tr:last-child td {
-            border-bottom: none;
-        }
+        .table tbody tr:hover { background: #fafcff; }
+        .table tbody tr:last-child td { border-bottom: none; }
 
-        .table .checkbox-row {
-            width: 30px;
-            text-align: center;
-        }
+        .table .checkbox-row { width: 30px; text-align: center; }
         .table .checkbox-row input[type="checkbox"] {
-            width: 18px;
-            height: 18px;
-            cursor: pointer;
-            accent-color: #1a73e8;
+            width: 18px; height: 18px; cursor: pointer; accent-color: #1a73e8;
         }
 
         .badge-status {
@@ -1047,208 +744,88 @@ $titulo = 'Painel do Coordenador - Gerenciamento de Ambientes';
             font-weight: 600;
         }
 
-        .badge-status.concluida {
-            background: #e6f7e9;
-            color: #1e8546;
-        }
-        .badge-status.pendente {
-            background: #fff2e0;
-            color: #b86a1f;
-        }
-        .badge-status.cancelada {
-            background: #ffe9e9;
-            color: #b33a3a;
-        }
-        .badge-status.aguardando {
-            background: #e3f2fd;
-            color: #0d47a1;
-        }
-        .badge-status.atrasada {
-            background: #ffebee;
-            color: #c62828;
-            border: 1px solid #ef9a9a;
-        }
+        .badge-status.concluida { background: #e6f7e9; color: #1e8546; }
+        .badge-status.pendente { background: #fff2e0; color: #b86a1f; }
+        .badge-status.cancelada { background: #ffe9e9; color: #b33a3a; }
+        .badge-status.aguardando { background: #e3f2fd; color: #0d47a1; }
+        .badge-status.atrasada { background: #ffebee; color: #c62828; border: 1px solid #ef9a9a; }
 
-        .progress-bar-wrapper {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-
-        .progress-bar {
-            width: 120px;
-            height: 8px;
-            background: #e2e9f3;
-            border-radius: 4px;
-            overflow: hidden;
-        }
-
-        .progress-bar .fill {
-            height: 100%;
-            border-radius: 4px;
-            transition: width 0.3s ease;
-        }
-
-        .progress-label {
-            font-weight: 600;
-            font-size: 13px;
-            min-width: 45px;
-        }
+        .progress-bar-wrapper { display: flex; align-items: center; gap: 12px; }
+        .progress-bar { width: 120px; height: 8px; background: #e2e9f3; border-radius: 4px; overflow: hidden; }
+        .progress-bar .fill { height: 100%; border-radius: 4px; transition: width 0.3s ease; }
+        .progress-label { font-weight: 600; font-size: 13px; min-width: 45px; }
 
         .actions-group {
-            display: flex;
-            gap: 6px;
-            flex-wrap: wrap;
-            margin-top: 16px;
-            padding-top: 16px;
-            border-top: 1px solid #f0f4fb;
+            display: flex; gap: 6px; flex-wrap: wrap;
+            margin-top: 16px; padding-top: 16px; border-top: 1px solid #f0f4fb;
         }
 
         .btn-action-sm {
-            font-size: 12px;
-            font-weight: 500;
-            text-decoration: none;
-            padding: 4px 12px;
-            border-radius: 60px;
-            transition: all 0.2s;
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-            border: none;
-            cursor: pointer;
+            font-size: 12px; font-weight: 500; text-decoration: none;
+            padding: 4px 12px; border-radius: 60px; transition: all 0.2s;
+            display: inline-flex; align-items: center; gap: 4px;
+            border: none; cursor: pointer;
         }
-        .btn-action-sm.btn-edit {
-            background: #e8f0fe;
-            color: #1a73e8;
-        }
-        .btn-action-sm.btn-edit:hover {
-            background: #d0dcfa;
-        }
-        .btn-action-sm.btn-success {
-            background: #e6f7e9;
-            color: #1e8546;
-        }
-        .btn-action-sm.btn-success:hover {
-            background: #c8f0cf;
-        }
-        .btn-action-sm.btn-warning {
-            background: #fff3e0;
-            color: #e37400;
-        }
-        .btn-action-sm.btn-warning:hover {
-            background: #ffe0b2;
-        }
-        .btn-action-sm.btn-danger {
-            background: #ffebee;
-            color: #c62828;
-        }
-        .btn-action-sm.btn-danger:hover {
-            background: #ffcdd2;
-        }
+        .btn-action-sm.btn-edit { background: #e8f0fe; color: #1a73e8; }
+        .btn-action-sm.btn-edit:hover { background: #d0dcfa; }
+        .btn-action-sm.btn-success { background: #e6f7e9; color: #1e8546; }
+        .btn-action-sm.btn-success:hover { background: #c8f0cf; }
+        .btn-action-sm.btn-warning { background: #fff3e0; color: #e37400; }
+        .btn-action-sm.btn-warning:hover { background: #ffe0b2; }
+        .btn-action-sm.btn-danger { background: #ffebee; color: #c62828; }
+        .btn-action-sm.btn-danger:hover { background: #ffcdd2; }
 
-        /* ======================================================
-           SEÇÃO DE AULAS ANTERIORES 
-        ====================================================== */
-        .section-anteriores {
-            border-color: #dc3545;
-            background: #fff5f5;
-        }
-        .section-anteriores .section-header h3 i {
-            color: #dc3545;
-        }
-        .section-anteriores .section-header .badge-count {
-            background: #dc3545;
-        }
+        .section-anteriores { border-color: #dc3545; background: #fff5f5; }
+        .section-anteriores .section-header h3 i { color: #dc3545; }
+        .section-anteriores .section-header .badge-count { background: #dc3545; }
 
-        @media (max-width: 1200px) {
-            .resumo-grid {
-                grid-template-columns: repeat(3, 1fr);
-            }
-        }
-
-        @media (max-width: 1024px) {
-            .resumo-grid {
-                grid-template-columns: repeat(2, 1fr);
-            }
-        }
+        @media (max-width: 1200px) { .resumo-grid { grid-template-columns: repeat(3, 1fr); } }
+        @media (max-width: 1024px) { .resumo-grid { grid-template-columns: repeat(2, 1fr); } }
 
         @media (max-width: 820px) {
             .sidebar {
-                position: fixed;
-                top: 0;
-                left: -300px;
-                width: 280px;
-                height: 100vh;
-                z-index: 999;
-                transition: left 0.3s ease;
-                padding-top: 70px;
+                position: fixed; top: 0; left: -300px; width: 280px; height: 100vh;
+                z-index: 999; transition: left 0.3s ease; padding-top: 70px;
             }
-            .sidebar.open {
-                left: 0;
-            }
-            .main {
-                padding: 16px 18px;
-            }
-            .resumo-grid {
-                grid-template-columns: 1fr 1fr;
-                gap: 12px;
-            }
-            .resumo-card {
-                padding: 16px;
-            }
+            .sidebar.open { left: 0; }
+            .main { padding: 16px 18px; }
+            .resumo-grid { grid-template-columns: 1fr 1fr; gap: 12px; }
+            .resumo-card { padding: 16px; }
         }
 
         @media (max-width: 540px) {
-            .main {
-                padding: 12px 14px;
-            }
-            .page-header {
-                flex-direction: column;
-                align-items: flex-start;
-            }
-            .header-actions {
-                width: 100%;
-            }
-            .header-actions .btn {
-                flex: 1;
-                justify-content: center;
-                font-size: 12px;
-                padding: 8px 12px;
-            }
-            .resumo-grid {
-                grid-template-columns: 1fr;
-            }
-            .section {
-                padding: 16px;
-            }
-            .table {
-                font-size: 12px;
-            }
-            .table th,
-            .table td {
-                padding: 6px 8px;
-            }
-            .progress-bar {
-                width: 80px;
-            }
+            .main { padding: 12px 14px; }
+            .page-header { flex-direction: column; align-items: flex-start; }
+            .header-actions { width: 100%; }
+            .header-actions .btn { flex: 1; justify-content: center; font-size: 12px; padding: 8px 12px; }
+            .resumo-grid { grid-template-columns: 1fr; }
+            .section { padding: 16px; }
+            .table { font-size: 12px; }
+            .table th, .table td { padding: 6px 8px; }
+            .progress-bar { width: 80px; }
         }
     </style>
 </head>
 <body>
 
+    <!-- Sidebar Include -->
     <?php include_once __DIR__ . '/../INCLUDES/sidebar.php'; ?>
 
     <main class="main">
 
         <header class="page-header">
             <div>
-                <h1 class="page-title"><i class="fas fa-chart-pie"></i> Painel do Coordenador</h1>
+                <h1 class="page-title"><i class="fas fa-chart-pie"></i> Relatório de Ocupação</h1>
                 <p class="page-subtitle">
                     Gestão de Aulas e Progresso dos Cursos - 
                     <strong><?php echo htmlspecialchars($nome_unidade); ?></strong>
                 </p>
             </div>
             <div class="header-actions">
+                <!-- Botão Voltar -->
+                <a href="../AUTENTIFICACAO_ACESSO/dashboard.php" class="btn">
+                    <i class="fas fa-arrow-left"></i> Voltar ao Dashboard
+                </a>
                 <span style="font-size: 13px; color: #7a8aa0;">
                     <i class="fas fa-building"></i> <?php echo htmlspecialchars($nome_cliente); ?>
                 </span>
@@ -1299,6 +876,29 @@ $titulo = 'Painel do Coordenador - Gerenciamento de Ambientes';
                     <div class="label"><i class="fas fa-calendar-times"></i> Aulas Atrasadas</div>
                 </div>
             </div>
+        </div>
+
+        <!-- GRÁFICO DE OCUPAÇÃO DAS SALAS -->
+        <div class="grafico-ocupacao-section">
+            <div class="section-header">
+                <h3><i class="fas fa-door-open"></i> Taxa de Ocupação das Salas</h3>
+                <span class="badge-count"><i class="fas fa-building"></i> <?php echo $total_salas; ?> salas no total</span>
+            </div>
+            
+            <!-- O gráfico agora fica sempre visível -->
+            <div class="chart-container">
+                <canvas id="graficoSalas"></canvas>
+            </div>
+            
+            <!-- A legenda só aparece se houver salas -->
+            <?php if ($total_salas > 0): ?>
+                <div class="chart-legend">
+                    <span><span class="dot" style="background: #34a853;"></span> Disponíveis (<?php echo $perc_disponiveis; ?>%)</span>
+                    <span><span class="dot" style="background: #1a73e8;"></span> Ocupadas (<?php echo $perc_ocupadas; ?>%)</span>
+                    <span><span class="dot" style="background: #f9ab00;"></span> Manutenção (<?php echo $perc_manutencao; ?>%)</span>
+                    <span><span class="dot" style="background: #dc3545;"></span> Inativas (<?php echo $perc_inativas; ?>%)</span>
+                </div>
+            <?php endif; ?>
         </div>
 
         <!-- LISTA 1: AULAS DO DIA -->
@@ -1440,12 +1040,10 @@ $titulo = 'Painel do Coordenador - Gerenciamento de Ambientes';
                                 $hora_fim = date('H:i', strtotime($aula['horario_fim']));
                                 $data_aula = date('d/m/Y', strtotime($aula['data_aula']));
                                 
-                                // Calcular dias de atraso
                                 $dataAulaObj = new DateTime($aula['data_aula']);
                                 $hojeObj = new DateTime();
                                 $diasAtraso = $hojeObj->diff($dataAulaObj)->days;
                                 
-                                // Status do curso
                                 $statusCurso = $aula['status_curso'] ?? 'ativo';
                                 $podeMarcar = ($statusCurso === 'ativo');
                             ?>
@@ -1552,13 +1150,12 @@ $titulo = 'Painel do Coordenador - Gerenciamento de Ambientes';
                             <th><i class="fas fa-check-double"></i> Aulas Realizadas</th>
                             <th><i class="fas fa-chart-simple"></i> Progresso</th>
                             <th><i class="fas fa-info-circle"></i> Status</th>
-                            <th><i class="fas fa-cogs"></i> Ações</th>
                         </tr>
                     </thead>
                     <tbody>
                         <?php if (empty($cursos_ativos)): ?>
                             <tr>
-                                <td colspan="6" style="text-align: center; padding: 30px; color: #7a8aa0;">
+                                <td colspan="5" style="text-align: center; padding: 30px; color: #7a8aa0;">
                                     <i class="fas fa-info-circle" style="font-size: 30px; display: block; margin-bottom: 8px;"></i>
                                     Nenhum curso ativo na sua unidade.
                                 </td>
@@ -1596,11 +1193,6 @@ $titulo = 'Painel do Coordenador - Gerenciamento de Ambientes';
                                             <span class="badge-status" style="background: #f0f4fb; color: #7a8aa0;"><i class="fas fa-hourglass-start"></i> Aguardando</span>
                                         <?php endif; ?>
                                     </td>
-                                    <td>
-                                        <a href="../CRONOGRAMA_AULAS/detalhes_curso.php?id=<?php echo $curso['id_curso']; ?>" class="btn-action-sm btn-edit">
-                                            <i class="fas fa-eye"></i> Detalhes
-                                        </a>
-                                    </td>
                                 </tr>
                             <?php endforeach; ?>
                         <?php endif; ?>
@@ -1608,57 +1200,6 @@ $titulo = 'Painel do Coordenador - Gerenciamento de Ambientes';
                 </table>
             </div>
         </div>
-
-        <!-- LISTA 3: CURSOS COM 100% PARA CONCLUIR -->
-        <?php if (!empty($cursos_para_concluir)): ?>
-        <div class="section" style="border-color: #34a853; background: #f0faf3;">
-            <div class="section-header">
-                <h3><i class="fas fa-flag-checkered" style="color: #34a853;"></i> Cursos com 100% para Concluir</h3>
-                <span class="badge-count success"><i class="fas fa-check-circle"></i> <?php echo count($cursos_para_concluir); ?> cursos</span>
-            </div>
-
-            <div class="table-wrapper">
-                <table class="table">
-                    <thead>
-                        <tr>
-                            <th><i class="fas fa-graduation-cap"></i> Curso</th>
-                            <th><i class="fas fa-user-tie"></i> Professor</th>
-                            <th><i class="fas fa-check-double"></i> Aulas Realizadas</th>
-                            <th><i class="fas fa-chart-simple"></i> Progresso</th>
-                            <th><i class="fas fa-cogs"></i> Ação</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php foreach ($cursos_para_concluir as $curso): ?>
-                            <tr>
-                                <td>
-                                    <strong><?php echo htmlspecialchars($curso['nome_curso']); ?></strong>
-                                    <br><small style="color: #7a8aa0;"><?php echo htmlspecialchars($curso['numero_curso']); ?></small>
-                                </td>
-                                <td><?php echo htmlspecialchars($curso['nome_professor'] ?? 'Não definido'); ?></td>
-                                <td><?php echo ($curso['aulas_realizadas'] ?? 0) . '/' . ($curso['total_aulas'] ?? 0); ?></td>
-                                <td>
-                                    <div class="progress-bar-wrapper">
-                                        <div class="progress-bar">
-                                            <div class="fill" style="width: 100%; background: #34a853;"></div>
-                                        </div>
-                                        <span class="progress-label">100%</span>
-                                    </div>
-                                </td>
-                                <td>
-                                    <a href="concluir_curso.php?id=<?php echo $curso['id_curso']; ?>" 
-                                       class="btn-action-sm btn-success"
-                                       onclick="return confirm('Concluir este curso? Todas as aulas foram realizadas.')">
-                                        <i class="fas fa-flag-checkered"></i> Concluir Curso
-                                    </a>
-                                </td>
-                            </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-        <?php endif; ?>
 
         <!-- LISTA 4: AULAS AGUARDANDO REMARCAÇÃO -->
         <?php if (!empty($aulas_aguardando)): ?>
@@ -1679,7 +1220,6 @@ $titulo = 'Painel do Coordenador - Gerenciamento de Ambientes';
                             <th><i class="fas fa-calendar-day"></i> Data</th>
                             <th><i class="fas fa-clock"></i> Horário</th>
                             <th><i class="fas fa-info-circle"></i> Status</th>
-                            <th><i class="fas fa-cogs"></i> Ação</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -1688,7 +1228,6 @@ $titulo = 'Painel do Coordenador - Gerenciamento de Ambientes';
                             $hora_fim = date('H:i', strtotime($aula['horario_fim']));
                             $data_aula = date('d/m/Y', strtotime($aula['data_aula']));
                             
-                            // Status do curso
                             $statusCurso = $aula['status_curso'] ?? 'ativo';
                             $podeEditar = ($statusCurso === 'ativo');
                         ?>
@@ -1735,17 +1274,6 @@ $titulo = 'Painel do Coordenador - Gerenciamento de Ambientes';
                                         <i class="fas fa-hourglass-half"></i> Aguardando
                                     </span>
                                 </td>
-                                <td>
-                                    <?php if ($podeEditar): ?>
-                                        <a href="../CRONOGRAMA_AULAS/editar_aula.php?id=<?php echo $aula['id_aula']; ?>" class="btn-action-sm btn-warning">
-                                            <i class="fas fa-edit"></i> Remarcar
-                                        </a>
-                                    <?php else: ?>
-                                        <span class="btn-action-sm" style="background: #f0f0f0; color: #999; cursor: not-allowed;">
-                                            <i class="fas fa-lock"></i> Bloqueado
-                                        </span>
-                                    <?php endif; ?>
-                                </td>
                             </tr>
                         <?php endforeach; ?>
                     </tbody>
@@ -1767,6 +1295,110 @@ $titulo = 'Painel do Coordenador - Gerenciamento de Ambientes';
         // Selecionar todas as aulas anteriores
         document.getElementById('selecionar_todas_anteriores')?.addEventListener('change', function() {
             document.querySelectorAll('.aula-anterior-checkbox').forEach(cb => cb.checked = this.checked);
+        });
+
+        // Script para renderizar o Gráfico de Ocupação (Atualizado para mostrar vazio)
+        document.addEventListener('DOMContentLoaded', function() {
+            const canvas = document.getElementById('graficoSalas');
+            if (canvas) {
+                const ctx = canvas.getContext('2d');
+                
+                const totalSalas = <?php echo $total_salas; ?>;
+                const dados = [
+                    <?php echo $salas_disponiveis; ?>, 
+                    <?php echo $salas_ocupadas; ?>, 
+                    <?php echo $salas_manutencao; ?>, 
+                    <?php echo $salas_inativas; ?>
+                ];
+                
+                // Se não houver salas, desenha um anel cinza com texto no centro
+                if (totalSalas === 0) {
+                    new Chart(ctx, {
+                        type: 'doughnut',
+                        data: {
+                            labels: ['Sem salas'],
+                            datasets: [{
+                                data: [1],
+                                backgroundColor: ['#e2e9f3'], // Cinza claro
+                                borderWidth: 0
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            cutout: '65%',
+                            plugins: {
+                                legend: { display: false },
+                                tooltip: { enabled: false },
+                                // Plugin customizado para escrever o texto no centro
+                                afterDraw: function(chart) {
+                                    const width = chart.width,
+                                        height = chart.height,
+                                        ctx = chart.ctx;
+                                    
+                                    ctx.restore();
+                                    const fontSize = (height / 114).toFixed(2);
+                                    ctx.font = fontSize + "em 'Inter', sans-serif";
+                                    ctx.textBaseline = "middle";
+                                    ctx.fillStyle = "#7a8aa0";
+                                    
+                                    const text = "Nenhuma sala",
+                                        textX = Math.round((width - ctx.measureText(text).width) / 2),
+                                        textY = height / 2 - 10;
+                                    
+                                    ctx.fillText(text, textX, textY);
+                                    
+                                    ctx.font = (fontSize * 0.7) + "em 'Inter', sans-serif";
+                                    const text2 = "cadastrada",
+                                        text2X = Math.round((width - ctx.measureText(text2).width) / 2),
+                                        text2Y = textY + 20;
+                                    
+                                    ctx.fillText(text2, text2X, text2Y);
+                                    
+                                    ctx.save();
+                                }
+                            }
+                        }
+                    });
+                } else {
+                    // Se houver salas, desenha o gráfico normal
+                    new Chart(ctx, {
+                        type: 'doughnut',
+                        data: {
+                            labels: ['Disponíveis', 'Ocupadas', 'Manutenção', 'Inativas'],
+                            datasets: [{
+                                data: dados,
+                                backgroundColor: [
+                                    '#34a853',
+                                    '#1a73e8',
+                                    '#f9ab00',
+                                    '#dc3545'
+                                ],
+                                borderWidth: 0,
+                                hoverOffset: 4
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            cutout: '65%',
+                            plugins: {
+                                legend: { display: false },
+                                tooltip: {
+                                    callbacks: {
+                                        label: function(context) {
+                                            let label = context.label || '';
+                                            let value = context.raw || 0;
+                                            let perc = totalSalas > 0 ? ((value / totalSalas) * 100).toFixed(1) : 0;
+                                            return `${label}: ${value} sala(s) (${perc}%)`;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    });
+                }
+            }
         });
     </script>
 

@@ -15,16 +15,13 @@ $sucesso = '';
 $dados_form = [];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    // Capturar dados do formulário
+    // Capturar dados do formulário (Endereço, Cidade e Estado removidos)
     $dados_form = [
         'nome_cliente' => trim($_POST['nome_cliente'] ?? ''),
         'tipo_cliente' => $_POST['tipo_cliente'] ?? 'outro',
         'cnpj' => trim($_POST['cnpj'] ?? ''),
         'email_cliente' => trim($_POST['email_cliente'] ?? ''),
         'telefone_cliente' => trim($_POST['telefone_cliente'] ?? ''),
-        'endereco' => trim($_POST['endereco'] ?? ''),
-        'cidade' => trim($_POST['cidade'] ?? ''),
-        'estado' => strtoupper(trim($_POST['estado'] ?? '')),
         'nome_usuario' => trim($_POST['nome_usuario'] ?? ''),
         'email_usuario' => trim($_POST['email_usuario'] ?? ''),
         'senha' => $_POST['senha'] ?? '',
@@ -80,27 +77,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     // Hash da senha
                     $senha_hash = password_hash($dados_form['senha'], PASSWORD_DEFAULT);
                     
-                    // 1. Inserir o cliente (organização)
+                    // 1. Inserir o cliente (organização) - Campos de endereço removidos da query
                     $sql = "INSERT INTO clientes 
                             (nome_cliente, tipo_cliente, cnpj_cliente, email_cliente, 
-                             telefone_cliente, endereco_cliente, cidade_cliente, 
-                             estado_cliente, status_cliente, plano_cliente, 
+                             telefone_cliente, status_cliente, plano_cliente, 
                              limite_unidades, limite_usuarios) 
                             VALUES 
                             (:nome, :tipo, :cnpj, :email, 
-                             :telefone, :endereco, :cidade, 
-                             :estado, 'ativo', 'gratuito', 
-                             3, 10) RETURNING id_cliente";
+                             :telefone, 'ativo', 'gratuito', 
+                             3, 10)";
                     $stmt = $conn->prepare($sql);
                     $stmt->execute([
                         ':nome' => $dados_form['nome_cliente'],
                         ':tipo' => $dados_form['tipo_cliente'],
                         ':cnpj' => $dados_form['cnpj'],
                         ':email' => $dados_form['email_cliente'],
-                        ':telefone' => $dados_form['telefone_cliente'],
-                        ':endereco' => $dados_form['endereco'],
-                        ':cidade' => $dados_form['cidade'],
-                        ':estado' => $dados_form['estado']
+                        ':telefone' => $dados_form['telefone_cliente']
                     ]);
                     
                     $id_cliente = $conn->lastInsertId();
@@ -366,11 +358,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             grid-template-columns: 1fr 1fr;
             gap: 14px;
         }
-        .form-row-3 {
-            display: grid;
-            grid-template-columns: 1fr 1fr 1fr;
-            gap: 14px;
-        }
 
         /* Botão */
         .cadastro-card .btn {
@@ -502,10 +489,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         /* Responsividade */
         @media (max-width: 768px) {
             .form-row {
-                grid-template-columns: 1fr;
-                gap: 0;
-            }
-            .form-row-3 {
                 grid-template-columns: 1fr;
                 gap: 0;
             }
@@ -655,39 +638,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <input type="tel" name="telefone_cliente" id="telefone_cliente" 
                                placeholder="(00) 00000-0000" 
                                value="<?php echo htmlspecialchars($dados_form['telefone_cliente'] ?? ''); ?>">
-                    </div>
-                </div>
-
-                <div class="form-group">
-                    <label for="endereco">
-                        <i class="fas fa-map-marker-alt"></i> Endereço
-                    </label>
-                    <input type="text" name="endereco" id="endereco" 
-                           placeholder="Rua, número, bairro" 
-                           value="<?php echo htmlspecialchars($dados_form['endereco'] ?? ''); ?>">
-                </div>
-
-                <div class="form-row-3">
-                    <div class="form-group">
-                        <label for="cidade">
-                            <i class="fas fa-city"></i> Cidade
-                        </label>
-                        <input type="text" name="cidade" id="cidade" 
-                               placeholder="Sua cidade" 
-                               value="<?php echo htmlspecialchars($dados_form['cidade'] ?? ''); ?>">
-                    </div>
-                    <div class="form-group">
-                        <label for="estado">
-                            <i class="fas fa-map"></i> Estado
-                        </label>
-                        <input type="text" name="estado" id="estado" 
-                               placeholder="UF" maxlength="2"
-                               value="<?php echo htmlspecialchars($dados_form['estado'] ?? ''); ?>">
-                    </div>
-                    <div class="form-group" style="display: flex; align-items: flex-end;">
-                        <div style="font-size: 11px; color: #9aabbf; padding-bottom: 8px;">
-                            <i class="fas fa-info-circle"></i> Ex: MG, SP, RJ
-                        </div>
                     </div>
                 </div>
 
@@ -947,11 +897,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 
                 btnCadastrar.disabled = true;
                 btnCadastrar.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Cadastrando...';
-            });
-
-            // Converter estado para maiúsculo
-            document.getElementById('estado').addEventListener('input', function() {
-                this.value = this.value.toUpperCase();
             });
         });
     </script>

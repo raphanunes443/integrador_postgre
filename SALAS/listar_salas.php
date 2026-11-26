@@ -1400,7 +1400,7 @@ $titulo = 'Listar Salas - Gerenciador de Salas';
 
                     <?php if ($pode_editar): ?>
                     <div class="sala-card-footer">
-                        <a href="editar_sala.php?id=<?php echo $sala['id_sala']; ?>" class="btn-action btn-edit">
+                        <a href="editar_salas.php?id=<?php echo $sala['id_sala']; ?>" class="btn-action btn-edit">
                             <i class="fas fa-edit"></i> Editar Sala
                         </a>
                     </div>

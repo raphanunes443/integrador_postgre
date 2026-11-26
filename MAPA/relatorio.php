@@ -1330,6 +1330,7 @@ $titulo = 'Relatório de Ocupação - ' . $nome_unidade;
                             <th><i class="fas fa-calendar-day"></i> Data</th>
                             <th><i class="fas fa-clock"></i> Horário</th>
                             <th><i class="fas fa-info-circle"></i> Status</th>
+                            <th><i class="fas fa-cogs"></i> Ações</th> <!-- NOVA COLUNA AQUI -->
                         </tr>
                     </thead>
                     <tbody>
@@ -1383,6 +1384,16 @@ $titulo = 'Relatório de Ocupação - ' . $nome_unidade;
                                     <span class="badge-status aguardando">
                                         <i class="fas fa-hourglass-half"></i> Aguardando
                                     </span>
+                                </td>
+                                <td>
+                                    <!-- BOTÃO REAGENDAR AQUI -->
+                                    <?php if ($podeEditar): ?>
+                                        <a href="../CRONOGRAMA_AULAS/editar_aula.php?id=<?php echo $aula['id_aula']; ?>" class="btn-action-sm btn-warning">
+                                            <i class="fas fa-calendar-alt"></i> Reagendar
+                                        </a>
+                                    <?php else: ?>
+                                        <span style="font-size: 11px; color: #999; font-style: italic;">Curso inativo</span>
+                                    <?php endif; ?>
                                 </td>
                             </tr>
                         <?php endforeach; ?>

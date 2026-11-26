@@ -108,3 +108,38 @@ Não é necessário instalar o PostgreSQL localmente. O banco de dados está hos
      $dbname = 'postgres';
      $username = 'postgres.SEU_PROJETO';
      $password = 'SIGAPROJ123';
+
+
+Plataforma	Link
+Repositório GitHub	https://github.com/raphanunes443/integrador_postgre
+Quadro Trello	https://trello.com/b/0g9ohsWu/siga-app
+👥 Autores
+Projeto desenvolvido pelos integrantes da Turma 0648:
+
+Shanaya Nataly — LinkedIn
+
+Raphael Nunes — LinkedIn
+
+Simone Alves — LinkedIn
+
+Aline Martins — LinkedIn
+
+Luiz Felipe — LinkedIn
+
+Carlos Wilson
+
+Orientador: Prof. Cleiton de Jesus Pereira
+Instituição: Faculdade Senac Belo Horizonte
+
+Acesse no navegador: http://localhost/nome-da-pasta/
+
+🔑 Acesso ao Sistema
+Para facilitar os testes e a avaliação do projeto, disponibilizamos abaixo as credenciais padrão de acesso:
+
+⚠️ Atenção: Altere a senha padrão após o primeiro login em ambiente de produção.
+
+Campo	Valor Padrão
+E-mail / Login:	siga@adm.com
+Senha:	Senha123@
+Perfil	Administrador
+💡 Dica: Caso não haja um usuário padrão no banco de dados, utilize a tela de Cadastro (cadastro.php) para criar uma nova organização e um usuário administrador.

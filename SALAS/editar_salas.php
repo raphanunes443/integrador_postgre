@@ -74,18 +74,18 @@ function atualizarStatusManutencao($conn, $id_sala, $id_cliente) {
         if ($manutencaoAtiva) {
             $sqlUpdate = "UPDATE salas SET status_sala = 'manutencao' WHERE id_sala = :id_sala AND id_cliente = :id_cliente";
             $stmtUpdate = $conn->prepare($sqlUpdate);
-            $stmtUpdate->execute([':id_sala' => $id_sala]);
+            $stmtUpdate->execute([':id_sala' => $id_sala, ':id_cliente' => $id_cliente]);
             return true;
         } else {
             $sqlVerificar = "SELECT status_sala FROM salas WHERE id_sala = :id_sala AND id_cliente = :id_cliente";
             $stmtVerificar = $conn->prepare($sqlVerificar);
-            $stmtVerificar->execute([':id_sala' => $id_sala]);
+            $stmtVerificar->execute([':id_sala' => $id_sala, ':id_cliente' => $id_cliente]);
             $statusAtual = $stmtVerificar->fetchColumn();
             
             if ($statusAtual === 'manutencao') {
                 $sqlUpdate = "UPDATE salas SET status_sala = 'disponivel' WHERE id_sala = :id_sala AND id_cliente = :id_cliente";
                 $stmtUpdate = $conn->prepare($sqlUpdate);
-                $stmtUpdate->execute([':id_sala' => $id_sala]);
+                $stmtUpdate->execute([':id_sala' => $id_sala, ':id_cliente' => $id_cliente]);
             }
             return false;
         }
@@ -535,11 +535,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['acao_manutencao'])) {
                 $sala['status_sala'] = 'manutencao';
             }
             
-            $sucesso = "✅ Manutenção registrada com sucesso! Período: $data_inicio a $data_fim.$mensagemAulas";
+            // MENSAGEM FORMATADA CORRETAMENTE COM QUEBRAS DE LINHA
+            $sucesso = "✅ <strong>Manutenção registrada com sucesso!</strong><br>";
+            $sucesso .= "Período: " . date('d/m/Y', strtotime($data_inicio)) . " a " . date('d/m/Y', strtotime($data_fim)) . "." . $mensagemAulas . "<br><br>";
+            
             if ($statusAtualSala === 'manutencao') {
-                $sucesso .= "<br>🔧 A sala está em <strong>MANUTENÇÃO</strong> (período já iniciado).";
+                $sucesso .= "🔧 A sala está em <strong>MANUTENÇÃO</strong> (período já iniciado).";
             } else {
-                $sucesso .= "<br>📌 A sala permanecerá <strong>DISPONÍVEL</strong> até o início da manutenção em " . date('d/m/Y', strtotime($data_inicio)) . ".";
+                $sucesso .= "📌 A sala permanecerá <strong>DISPONÍVEL</strong> até o início da manutenção em " . date('d/m/Y', strtotime($data_inicio)) . ".";
             }
             $sucesso .= "<br>🔄 Quando a manutenção for concluída, clique em <strong>'Finalizar Manutenção'</strong> para liberar a sala.";
 
@@ -1142,21 +1145,32 @@ if ($message && $message['tipo'] === 'error') {
             border-top: 1px solid #f0f4fb;
         }
 
+        /* ============================================================
+           CORREÇÃO DO LAYOUT DOS ALERTS
+        ============================================================ */
         .alert {
-            padding: 12px 16px;
+            padding: 16px 20px;
             border-radius: 12px;
             font-size: 14px;
             font-weight: 500;
             margin-bottom: 18px;
             display: flex;
-            align-items: center;
-            gap: 8px;
+            align-items: flex-start; /* Alinha o ícone no topo */
+            gap: 12px;
+            line-height: 1.5; /* Melhora o espaçamento entre as linhas */
+        }
+        .alert i {
+            font-size: 20px;
+            margin-top: 2px; /* Ajuste fino para alinhar com a primeira linha */
+            flex-shrink: 0;
+        }
+        .alert-content {
+            flex: 1;
         }
         .alert-danger { background: #ffe9e9; color: #b33a3a; border: 1px solid #ffd6d6; }
         .alert-success { background: #e6f7e9; color: #1e8546; border: 1px solid #c8f0cf; }
         .alert-warning { background: #fff3cd; color: #856404; border: 1px solid #ffc107; }
         .alert-info { background: #e3f2fd; color: #0d47a1; border: 1px solid #b8d4f0; }
-        .alert i { font-size: 18px; }
 
         .unidade-disabled {
             padding: 10px 14px;
@@ -1414,17 +1428,23 @@ if ($message && $message['tipo'] === 'error') {
         </header>
 
         <?php if ($erro): ?>
-            <div class="alert alert-danger"><i class="fas fa-exclamation-circle"></i> <?php echo htmlspecialchars($erro); ?></div>
+            <div class="alert alert-danger">
+                <i class="fas fa-exclamation-circle"></i> 
+                <div class="alert-content"><?php echo $erro; ?></div>
+            </div>
         <?php endif; ?>
         <?php if ($sucesso): ?>
-            <div class="alert alert-success"><i class="fas fa-check-circle"></i> <?php echo $sucesso; ?></div>
+            <div class="alert alert-success">
+                <i class="fas fa-check-circle"></i> 
+                <div class="alert-content"><?php echo $sucesso; ?></div>
+            </div>
         <?php endif; ?>
 
         <!-- AVISO DE MANUTENÇÃO FUTURA -->
         <?php if ($manutencaoFutura && $sala['status_sala'] !== 'manutencao'): ?>
             <div class="alert alert-info" style="max-width: 700px; margin: 0 auto 20px;">
                 <i class="fas fa-calendar-alt"></i>
-                <div>
+                <div class="alert-content">
                     <strong>📅 Manutenção agendada para <?php echo date('d/m/Y', strtotime($dataProximaManutencao)); ?></strong>
                     <br>A sala permanecerá <strong>DISPONÍVEL</strong> até o início da manutenção.
                     <br>Durante o período da manutenção, a sala ficará com status <strong>"Em Manutenção"</strong> automaticamente.
@@ -1435,7 +1455,7 @@ if ($message && $message['tipo'] === 'error') {
         <?php if ($sala['status_sala'] === 'manutencao'): ?>
             <div class="alert alert-warning" style="max-width: 700px; margin: 0 auto 20px;">
                 <i class="fas fa-tools"></i>
-                <div>
+                <div class="alert-content">
                     <strong>🔧 Sala em Manutenção</strong>
                     <br>Esta sala está atualmente em manutenção e <strong>NÃO</strong> pode receber novos agendamentos.
                     <br>Para liberar a sala, clique em <strong>"Finalizar Manutenção"</strong> no histórico abaixo.
@@ -1446,7 +1466,7 @@ if ($message && $message['tipo'] === 'error') {
         <?php if ($sala['status_sala'] !== 'inativa' && $sala['status_sala'] !== 'manutencao' && $totalAulasAfetadas > 0): ?>
             <div class="alert alert-warning" style="max-width: 700px; margin: 0 auto 20px;">
                 <i class="fas fa-exclamation-triangle"></i>
-                <div>
+                <div class="alert-content">
                     <strong>Atenção!</strong> Esta sala possui <strong><?php echo $totalAulasAfetadas; ?> aula(s) futura(s) agendada(s)</strong>.
                     Ao marcar a sala como <strong>"Inativa"</strong>, todas essas aulas serão marcadas como <strong>"Aguardando Remarcação"</strong>.
                 </div>
@@ -1456,7 +1476,7 @@ if ($message && $message['tipo'] === 'error') {
         <?php if ($sala['status_sala'] === 'inativa'): ?>
             <div class="alert alert-warning" style="max-width: 700px; margin: 0 auto 20px;">
                 <i class="fas fa-info-circle"></i>
-                <div>
+                <div class="alert-content">
                     <strong>Sala Inativa</strong>
                     <br>Todas as aulas futuras foram marcadas como <strong>"Aguardando Remarcação"</strong>.
                     Ao reativar, as aulas voltarão ao status <strong>"Agendada"</strong>.

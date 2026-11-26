@@ -671,20 +671,8 @@ $titulo = 'Cadastrar Curso - Gerenciador de Salas';
             }
         });
 
-        // ============================================================
-        // VALIDAR DATA DE INÍCIO (não pode ser no passado)
-        // ============================================================
-        const dataInput = document.getElementById('data_inicio_curso');
-        dataInput.addEventListener('change', function() {
-            const hoje = new Date();
-            hoje.setHours(0, 0, 0, 0);
-            const dataSelecionada = new Date(this.value);
-            
-            if (dataSelecionada < hoje) {
-                alert('⚠️ A data de início não pode ser no passado.');
-                this.value = '';
-            }
-        });
+        // A validação que impedia datas passadas foi removida.
+        // Agora é possível cadastrar cursos que já estão em andamento.
     });
 </script>
 </body>

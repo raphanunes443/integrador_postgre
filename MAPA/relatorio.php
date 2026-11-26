@@ -84,6 +84,9 @@ $tipo_mensagem = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['acao'])) {
     $acao = $_POST['acao'];
     
+    // ============================================================
+    // AÇÃO: MARCAR AULAS DO DIA COMO CONCLUÍDAS
+    // ============================================================
     if ($acao === 'marcar_concluidas' && isset($_POST['aulas_selecionadas'])) {
         $aulas_ids = $_POST['aulas_selecionadas'];
         if (!empty($aulas_ids)) {
@@ -97,7 +100,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['acao'])) {
                 $stmt_cursos->execute($params_cursos);
                 $cursos_afetados = $stmt_cursos->fetchAll(PDO::FETCH_COLUMN);
                 
-                $sql = "UPDATE cronograma SET status_aula = 'realizada', observacao = CONCAT(IFNULL(observacao, ''), ' | Marcada como concluída em ', NOW()) WHERE id_aula IN ($placeholders) AND id_cliente = ? AND id_unidade = ?";
+                // CORREÇÃO POSTGRESQL: Usando || e COALESCE em vez de CONCAT e IFNULL
+                $sql = "UPDATE cronograma SET status_aula = 'realizada', observacao = COALESCE(observacao, '') || ' | Marcada como concluída em ' || NOW()::text WHERE id_aula IN ($placeholders) AND id_cliente = ? AND id_unidade = ?";
                 $stmt = $conn->prepare($sql);
                 $params = array_merge($aulas_ids, [$id_cliente, $id_unidade]);
                 $stmt->execute($params);
@@ -112,6 +116,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['acao'])) {
             } catch (PDOException $e) {
                 $conn->rollBack();
                 $mensagem = 'Erro ao marcar aulas: ' . $e->getMessage();
+                $tipo_mensagem = 'danger';
+            }
+        }
+    }
+
+    // ============================================================
+    // AÇÃO: MARCAR AULAS ANTERIORES COMO CONCLUÍDAS (NOVO)
+    // ============================================================
+    if ($acao === 'marcar_anteriores_concluidas' && isset($_POST['aulas_anteriores_selecionadas'])) {
+        $aulas_ids = $_POST['aulas_anteriores_selecionadas'];
+        if (!empty($aulas_ids)) {
+            try {
+                $conn->beginTransaction();
+                $placeholders = implode(',', array_fill(0, count($aulas_ids), '?'));
+                
+                $sql_cursos = "SELECT DISTINCT id_curso FROM cronograma WHERE id_aula IN ($placeholders) AND id_cliente = ?";
+                $stmt_cursos = $conn->prepare($sql_cursos);
+                $params_cursos = array_merge($aulas_ids, [$id_cliente]);
+                $stmt_cursos->execute($params_cursos);
+                $cursos_afetados = $stmt_cursos->fetchAll(PDO::FETCH_COLUMN);
+                
+                // CORREÇÃO POSTGRESQL
+                $sql = "UPDATE cronograma SET status_aula = 'realizada', observacao = COALESCE(observacao, '') || ' | Marcada como concluída (retroativa) em ' || NOW()::text WHERE id_aula IN ($placeholders) AND id_cliente = ? AND id_unidade = ?";
+                $stmt = $conn->prepare($sql);
+                $params = array_merge($aulas_ids, [$id_cliente, $id_unidade]);
+                $stmt->execute($params);
+                $qtd = $stmt->rowCount();
+                
+                foreach ($cursos_afetados as $id_curso) {
+                    atualizarPercentualCurso($conn, $id_curso, $id_cliente, $id_unidade);
+                }
+                $conn->commit();
+                $mensagem = "$qtd aula(s) anterior(es) marcada(s) como concluída(s) com sucesso!";
+                $tipo_mensagem = 'success';
+            } catch (PDOException $e) {
+                $conn->rollBack();
+                $mensagem = 'Erro ao marcar aulas anteriores: ' . $e->getMessage();
                 $tipo_mensagem = 'danger';
             }
         }

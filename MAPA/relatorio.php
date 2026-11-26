@@ -100,7 +100,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['acao'])) {
                 $stmt_cursos->execute($params_cursos);
                 $cursos_afetados = $stmt_cursos->fetchAll(PDO::FETCH_COLUMN);
                 
-                // CORREÇÃO POSTGRESQL: Usando || e COALESCE em vez de CONCAT e IFNULL
+                // CORREÇÃO POSTGRESQL
                 $sql = "UPDATE cronograma SET status_aula = 'realizada', observacao = COALESCE(observacao, '') || ' | Marcada como concluída em ' || NOW()::text WHERE id_aula IN ($placeholders) AND id_cliente = ? AND id_unidade = ?";
                 $stmt = $conn->prepare($sql);
                 $params = array_merge($aulas_ids, [$id_cliente, $id_unidade]);
@@ -122,7 +122,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['acao'])) {
     }
 
     // ============================================================
-    // AÇÃO: MARCAR AULAS ANTERIORES COMO CONCLUÍDAS (NOVO)
+    // AÇÃO: MARCAR AULAS ANTERIORES COMO CONCLUÍDAS
     // ============================================================
     if ($acao === 'marcar_anteriores_concluidas' && isset($_POST['aulas_anteriores_selecionadas'])) {
         $aulas_ids = $_POST['aulas_anteriores_selecionadas'];
@@ -197,15 +197,13 @@ $cursos_ativos = [];
 $cursos_para_concluir = [];
 $aulas_aguardando = [];
 $aulas_anteriores_pendentes = [];
-$total_salas = 0;
-$salas_disponiveis = 0;
-$salas_ocupadas = 0;
-$salas_manutencao = 0;
-$salas_inativas = 0;
-$perc_disponiveis = 0;
-$perc_ocupadas = 0;
-$perc_manutencao = 0;
-$perc_inativas = 0;
+
+// Variáveis para os 3 gráficos de turno
+$graficos_turnos = [
+    'manha' => ['total' => 0, 'disp' => 0, 'ocup' => 0, 'manut' => 0, 'inat' => 0, 'perc_disp' => 0, 'perc_ocup' => 0, 'perc_manut' => 0, 'perc_inat' => 0],
+    'tarde' => ['total' => 0, 'disp' => 0, 'ocup' => 0, 'manut' => 0, 'inat' => 0, 'perc_disp' => 0, 'perc_ocup' => 0, 'perc_manut' => 0, 'perc_inat' => 0],
+    'noite' => ['total' => 0, 'disp' => 0, 'ocup' => 0, 'manut' => 0, 'inat' => 0, 'perc_disp' => 0, 'perc_ocup' => 0, 'perc_manut' => 0, 'perc_inat' => 0],
+];
 
 try {
     $data_atual = date('Y-m-d');
@@ -308,23 +306,61 @@ try {
     $stmt->execute([':data_atual' => date('Y-m-d'), ':id_cliente' => $id_cliente, ':id_unidade' => $id_unidade]);
     $aulas_anteriores_pendentes = $stmt->fetchAll();
 
-    // 7. DADOS PARA O GRÁFICO DE OCUPAÇÃO DE SALAS
-    $sql_salas = "SELECT status_sala, COUNT(*) as qtd FROM salas WHERE id_cliente = :id_cliente AND id_unidade = :id_unidade GROUP BY status_sala";
+    // ============================================================
+    // 7. DADOS PARA OS GRÁFICOS DE OCUPAÇÃO (MANHÃ, TARDE, NOITE)
+    // ============================================================
+    
+    // Busca todas as salas (para saber o total e as fixas em manutenção/inativas)
+    $sql_salas = "SELECT id_sala, status_sala FROM salas WHERE id_cliente = :id_cliente AND id_unidade = :id_unidade";
     $stmt_salas = $conn->prepare($sql_salas);
     $stmt_salas->execute([':id_cliente' => $id_cliente, ':id_unidade' => $id_unidade]);
-    $salas_status = $stmt_salas->fetchAll(PDO::FETCH_KEY_PAIR);
+    $salas_raw = $stmt_salas->fetchAll(PDO::FETCH_ASSOC);
 
-    $salas_disponiveis = $salas_status['disponivel'] ?? 0;
-    $salas_ocupadas = $salas_status['ocupada'] ?? 0;
-    $salas_manutencao = $salas_status['manutencao'] ?? 0;
-    $salas_inativas = $salas_status['inativa'] ?? 0;
-    $total_salas = $salas_disponiveis + $salas_ocupadas + $salas_manutencao + $salas_inativas;
+    // Busca as aulas do dia atual para verificar a ocupação em cada turno
+    $sql_aulas_hoje_turnos = "SELECT DISTINCT id_sala, turno FROM cronograma 
+                              WHERE data_aula = :data_atual 
+                              AND status_aula NOT IN ('cancelada', 'aguardando_remarcacao')
+                              AND id_cliente = :id_cliente 
+                              AND id_unidade = :id_unidade";
+    $stmt_aulas_hoje_turnos = $conn->prepare($sql_aulas_hoje_turnos);
+    $stmt_aulas_hoje_turnos->execute([
+        ':data_atual' => $data_atual,
+        ':id_cliente' => $id_cliente,
+        ':id_unidade' => $id_unidade
+    ]);
+    $aulas_turnos_raw = $stmt_aulas_hoje_turnos->fetchAll(PDO::FETCH_ASSOC);
 
-    if ($total_salas > 0) {
-        $perc_disponiveis = round(($salas_disponiveis / $total_salas) * 100, 1);
-        $perc_ocupadas = round(($salas_ocupadas / $total_salas) * 100, 1);
-        $perc_manutencao = round(($salas_manutencao / $total_salas) * 100, 1);
-        $perc_inativas = round(($salas_inativas / $total_salas) * 100, 1);
+    // Organiza quais salas estão ocupadas em cada turno
+    $salas_ocupadas_por_turno = ['manha' => [], 'tarde' => [], 'noite' => []];
+    foreach ($aulas_turnos_raw as $at) {
+        if (isset($salas_ocupadas_por_turno[$at['turno']])) {
+            $salas_ocupadas_por_turno[$at['turno']][] = $at['id_sala'];
+        }
+    }
+
+    // Calcula a ocupação para cada turno
+    foreach ($graficos_turnos as $turno => &$dados) {
+        $dados['total'] = count($salas_raw);
+        
+        foreach ($salas_raw as $sala) {
+            if ($sala['status_sala'] === 'inativa') {
+                $dados['inat']++;
+            } elseif ($sala['status_sala'] === 'manutencao') {
+                $dados['manut']++;
+            } elseif (in_array($sala['id_sala'], $salas_ocupadas_por_turno[$turno])) {
+                $dados['ocup']++;
+            } else {
+                $dados['disp']++;
+            }
+        }
+
+        // Calcula porcentagens
+        if ($dados['total'] > 0) {
+            $dados['perc_disp'] = round(($dados['disp'] / $dados['total']) * 100, 1);
+            $dados['perc_ocup'] = round(($dados['ocup'] / $dados['total']) * 100, 1);
+            $dados['perc_manut'] = round(($dados['manut'] / $dados['total']) * 100, 1);
+            $dados['perc_inat'] = round(($dados['inat'] / $dados['total']) * 100, 1);
+        }
     }
     
 } catch (PDOException $e) {
@@ -671,47 +707,51 @@ $titulo = 'Relatório de Ocupação - ' . $nome_unidade;
         .resumo-card .info .label { font-size: 13px; color: #7a8aa0; font-weight: 500; }
 
         /* ======================================================
-           GRÁFICO DE OCUPAÇÃO
+           GRÁFICOS DE OCUPAÇÃO POR TURNO
         ====================================================== */
-        .grafico-ocupacao-section {
+        .graficos-turnos-section {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+            margin-bottom: 28px;
+        }
+        .grafico-turno-card {
             background: #ffffff;
             border-radius: 16px;
             border: 1px solid #ebf0f8;
-            padding: 24px 28px;
-            margin-bottom: 28px;
-        }
-        .grafico-ocupacao-section .section-header {
+            padding: 20px;
             display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 16px;
-            flex-wrap: wrap;
-            gap: 12px;
+            flex-direction: column;
         }
-        .grafico-ocupacao-section .section-header h3 {
-            font-size: 16px;
+        .grafico-turno-card .turno-header {
+            text-align: center;
+            margin-bottom: 16px;
             font-weight: 600;
             color: #0e1a2b;
+            font-size: 15px;
         }
-        .grafico-ocupacao-section .section-header h3 i { color: #1a73e8; margin-right: 8px; }
-        .chart-container {
+        .grafico-turno-card .turno-header i { margin-right: 6px; }
+        .grafico-turno-card .turno-header.manha i { color: #f9ab00; }
+        .grafico-turno-card .turno-header.tarde i { color: #e37400; }
+        .grafico-turno-card .turno-header.noite i { color: #1a2639; }
+        
+        .chart-container-small {
             position: relative;
-            height: 250px;
+            height: 180px;
             width: 100%;
-            max-width: 500px;
             margin: 0 auto;
         }
-        .chart-legend {
+        .chart-legend-small {
             display: flex;
             justify-content: center;
-            gap: 20px;
+            gap: 10px;
             flex-wrap: wrap;
-            margin-top: 16px;
-            font-size: 13px;
+            margin-top: 12px;
+            font-size: 11px;
             color: #5a6a7e;
         }
-        .chart-legend span { display: flex; align-items: center; gap: 6px; font-weight: 500; }
-        .chart-legend .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+        .chart-legend-small span { display: flex; align-items: center; gap: 4px; font-weight: 500; }
+        .chart-legend-small .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
 
         .section {
             background: #ffffff;
@@ -820,8 +860,15 @@ $titulo = 'Relatório de Ocupação - ' . $nome_unidade;
         .section-anteriores .section-header h3 i { color: #dc3545; }
         .section-anteriores .section-header .badge-count { background: #dc3545; }
 
-        @media (max-width: 1200px) { .resumo-grid { grid-template-columns: repeat(3, 1fr); } }
-        @media (max-width: 1024px) { .resumo-grid { grid-template-columns: repeat(2, 1fr); } }
+        @media (max-width: 1200px) { 
+            .resumo-grid { grid-template-columns: repeat(3, 1fr); } 
+            .graficos-turnos-section { grid-template-columns: repeat(3, 1fr); }
+        }
+        @media (max-width: 1024px) { 
+            .resumo-grid { grid-template-columns: repeat(2, 1fr); } 
+            .graficos-turnos-section { grid-template-columns: 1fr; }
+            .grafico-turno-card { max-width: 400px; margin: 0 auto; width: 100%; }
+        }
 
         @media (max-width: 820px) {
             .sidebar {
@@ -919,27 +966,49 @@ $titulo = 'Relatório de Ocupação - ' . $nome_unidade;
             </div>
         </div>
 
-        <!-- GRÁFICO DE OCUPAÇÃO DAS SALAS -->
-        <div class="grafico-ocupacao-section">
-            <div class="section-header">
-                <h3><i class="fas fa-door-open"></i> Taxa de Ocupação das Salas</h3>
-                <span class="badge-count"><i class="fas fa-building"></i> <?php echo $total_salas; ?> salas no total</span>
-            </div>
-            
-            <!-- O gráfico agora fica sempre visível -->
-            <div class="chart-container">
-                <canvas id="graficoSalas"></canvas>
-            </div>
-            
-            <!-- A legenda só aparece se houver salas -->
-            <?php if ($total_salas > 0): ?>
-                <div class="chart-legend">
-                    <span><span class="dot" style="background: #34a853;"></span> Disponíveis (<?php echo $perc_disponiveis; ?>%)</span>
-                    <span><span class="dot" style="background: #1a73e8;"></span> Ocupadas (<?php echo $perc_ocupadas; ?>%)</span>
-                    <span><span class="dot" style="background: #f9ab00;"></span> Manutenção (<?php echo $perc_manutencao; ?>%)</span>
-                    <span><span class="dot" style="background: #dc3545;"></span> Inativas (<?php echo $perc_inativas; ?>%)</span>
+        <!-- GRÁFICOS DE OCUPAÇÃO POR TURNO (MANHÃ, TARDE, NOITE) -->
+        <div class="graficos-turnos-section">
+            <!-- Gráfico Manhã -->
+            <div class="grafico-turno-card">
+                <div class="turno-header manha"><i class="fas fa-sun"></i> Ocupação: Manhã</div>
+                <div class="chart-container-small">
+                    <canvas id="graficoManha"></canvas>
                 </div>
-            <?php endif; ?>
+                <div class="chart-legend-small">
+                    <span><span class="dot" style="background: #34a853;"></span> Livres (<?php echo $graficos_turnos['manha']['perc_disp']; ?>%)</span>
+                    <span><span class="dot" style="background: #1a73e8;"></span> Ocupadas (<?php echo $graficos_turnos['manha']['perc_ocup']; ?>%)</span>
+                    <span><span class="dot" style="background: #f9ab00;"></span> Manut (<?php echo $graficos_turnos['manha']['perc_manut']; ?>%)</span>
+                    <span><span class="dot" style="background: #dc3545;"></span> Inativas (<?php echo $graficos_turnos['manha']['perc_inat']; ?>%)</span>
+                </div>
+            </div>
+
+            <!-- Gráfico Tarde -->
+            <div class="grafico-turno-card">
+                <div class="turno-header tarde"><i class="fas fa-cloud-sun"></i> Ocupação: Tarde</div>
+                <div class="chart-container-small">
+                    <canvas id="graficoTarde"></canvas>
+                </div>
+                <div class="chart-legend-small">
+                    <span><span class="dot" style="background: #34a853;"></span> Livres (<?php echo $graficos_turnos['tarde']['perc_disp']; ?>%)</span>
+                    <span><span class="dot" style="background: #1a73e8;"></span> Ocupadas (<?php echo $graficos_turnos['tarde']['perc_ocup']; ?>%)</span>
+                    <span><span class="dot" style="background: #f9ab00;"></span> Manut (<?php echo $graficos_turnos['tarde']['perc_manut']; ?>%)</span>
+                    <span><span class="dot" style="background: #dc3545;"></span> Inativas (<?php echo $graficos_turnos['tarde']['perc_inat']; ?>%)</span>
+                </div>
+            </div>
+
+            <!-- Gráfico Noite -->
+            <div class="grafico-turno-card">
+                <div class="turno-header noite"><i class="fas fa-moon"></i> Ocupação: Noite</div>
+                <div class="chart-container-small">
+                    <canvas id="graficoNoite"></canvas>
+                </div>
+                <div class="chart-legend-small">
+                    <span><span class="dot" style="background: #34a853;"></span> Livres (<?php echo $graficos_turnos['noite']['perc_disp']; ?>%)</span>
+                    <span><span class="dot" style="background: #1a73e8;"></span> Ocupadas (<?php echo $graficos_turnos['noite']['perc_ocup']; ?>%)</span>
+                    <span><span class="dot" style="background: #f9ab00;"></span> Manut (<?php echo $graficos_turnos['noite']['perc_manut']; ?>%)</span>
+                    <span><span class="dot" style="background: #dc3545;"></span> Inativas (<?php echo $graficos_turnos['noite']['perc_inat']; ?>%)</span>
+                </div>
+            </div>
         </div>
 
         <!-- LISTA 1: AULAS DO DIA -->
@@ -1338,31 +1407,40 @@ $titulo = 'Relatório de Ocupação - ' . $nome_unidade;
             document.querySelectorAll('.aula-anterior-checkbox').forEach(cb => cb.checked = this.checked);
         });
 
-        // Script para renderizar o Gráfico de Ocupação (Atualizado para mostrar vazio)
+        // Script para renderizar os 3 Gráficos de Ocupação (Manhã, Tarde, Noite)
         document.addEventListener('DOMContentLoaded', function() {
-            const canvas = document.getElementById('graficoSalas');
-            if (canvas) {
+            
+            // Dados do PHP para o JS
+            const graficosData = {
+                manha: {
+                    total: <?php echo $graficos_turnos['manha']['total']; ?>,
+                    dados: [<?php echo $graficos_turnos['manha']['disp']; ?>, <?php echo $graficos_turnos['manha']['ocup']; ?>, <?php echo $graficos_turnos['manha']['manut']; ?>, <?php echo $graficos_turnos['manha']['inat']; ?>]
+                },
+                tarde: {
+                    total: <?php echo $graficos_turnos['tarde']['total']; ?>,
+                    dados: [<?php echo $graficos_turnos['tarde']['disp']; ?>, <?php echo $graficos_turnos['tarde']['ocup']; ?>, <?php echo $graficos_turnos['tarde']['manut']; ?>, <?php echo $graficos_turnos['tarde']['inat']; ?>]
+                },
+                noite: {
+                    total: <?php echo $graficos_turnos['noite']['total']; ?>,
+                    dados: [<?php echo $graficos_turnos['noite']['disp']; ?>, <?php echo $graficos_turnos['noite']['ocup']; ?>, <?php echo $graficos_turnos['noite']['manut']; ?>, <?php echo $graficos_turnos['noite']['inat']; ?>]
+                }
+            };
+
+            const cores = ['#34a853', '#1a73e8', '#f9ab00', '#dc3545'];
+            const labels = ['Disponíveis', 'Ocupadas', 'Manutenção', 'Inativas'];
+
+            function criarGrafico(canvasId, total, dados) {
+                const canvas = document.getElementById(canvasId);
+                if (!canvas) return;
                 const ctx = canvas.getContext('2d');
-                
-                const totalSalas = <?php echo $total_salas; ?>;
-                const dados = [
-                    <?php echo $salas_disponiveis; ?>, 
-                    <?php echo $salas_ocupadas; ?>, 
-                    <?php echo $salas_manutencao; ?>, 
-                    <?php echo $salas_inativas; ?>
-                ];
-                
-                // Se não houver salas, desenha um anel cinza com texto no centro
-                if (totalSalas === 0) {
+
+                if (total === 0) {
+                    // Gráfico Vazio
                     new Chart(ctx, {
                         type: 'doughnut',
                         data: {
                             labels: ['Sem salas'],
-                            datasets: [{
-                                data: [1],
-                                backgroundColor: ['#e2e9f3'], // Cinza claro
-                                borderWidth: 0
-                            }]
+                            datasets: [{ data: [1], backgroundColor: ['#e2e9f3'], borderWidth: 0 }]
                         },
                         options: {
                             responsive: true,
@@ -1371,50 +1449,29 @@ $titulo = 'Relatório de Ocupação - ' . $nome_unidade;
                             plugins: {
                                 legend: { display: false },
                                 tooltip: { enabled: false },
-                                // Plugin customizado para escrever o texto no centro
                                 afterDraw: function(chart) {
-                                    const width = chart.width,
-                                        height = chart.height,
-                                        ctx = chart.ctx;
-                                    
+                                    const width = chart.width, height = chart.height, ctx = chart.ctx;
                                     ctx.restore();
                                     const fontSize = (height / 114).toFixed(2);
                                     ctx.font = fontSize + "em 'Inter', sans-serif";
                                     ctx.textBaseline = "middle";
                                     ctx.fillStyle = "#7a8aa0";
-                                    
-                                    const text = "Nenhuma sala",
-                                        textX = Math.round((width - ctx.measureText(text).width) / 2),
-                                        textY = height / 2 - 10;
-                                    
+                                    const text = "Nenhuma sala", textX = Math.round((width - ctx.measureText(text).width) / 2), textY = height / 2;
                                     ctx.fillText(text, textX, textY);
-                                    
-                                    ctx.font = (fontSize * 0.7) + "em 'Inter', sans-serif";
-                                    const text2 = "cadastrada",
-                                        text2X = Math.round((width - ctx.measureText(text2).width) / 2),
-                                        text2Y = textY + 20;
-                                    
-                                    ctx.fillText(text2, text2X, text2Y);
-                                    
                                     ctx.save();
                                 }
                             }
                         }
                     });
                 } else {
-                    // Se houver salas, desenha o gráfico normal
+                    // Gráfico com dados
                     new Chart(ctx, {
                         type: 'doughnut',
                         data: {
-                            labels: ['Disponíveis', 'Ocupadas', 'Manutenção', 'Inativas'],
+                            labels: labels,
                             datasets: [{
                                 data: dados,
-                                backgroundColor: [
-                                    '#34a853',
-                                    '#1a73e8',
-                                    '#f9ab00',
-                                    '#dc3545'
-                                ],
+                                backgroundColor: cores,
                                 borderWidth: 0,
                                 hoverOffset: 4
                             }]
@@ -1430,7 +1487,7 @@ $titulo = 'Relatório de Ocupação - ' . $nome_unidade;
                                         label: function(context) {
                                             let label = context.label || '';
                                             let value = context.raw || 0;
-                                            let perc = totalSalas > 0 ? ((value / totalSalas) * 100).toFixed(1) : 0;
+                                            let perc = total > 0 ? ((value / total) * 100).toFixed(1) : 0;
                                             return `${label}: ${value} sala(s) (${perc}%)`;
                                         }
                                     }
@@ -1440,6 +1497,11 @@ $titulo = 'Relatório de Ocupação - ' . $nome_unidade;
                     });
                 }
             }
+
+            // Renderiza os 3 gráficos
+            criarGrafico('graficoManha', graficosData.manha.total, graficosData.manha.dados);
+            criarGrafico('graficoTarde', graficosData.tarde.total, graficosData.tarde.dados);
+            criarGrafico('graficoNoite', graficosData.noite.total, graficosData.noite.dados);
         });
     </script>
 

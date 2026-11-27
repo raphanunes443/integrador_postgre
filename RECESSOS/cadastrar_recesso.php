@@ -99,9 +99,9 @@ function buscarDiasRecesso($conn, $id_unidade, $id_cliente, $id_curso = null) {
 }
 
 // ============================================================
-// FUNÇÃO PARA EMPURRAR AULAS PARA FRENTE (MODIFICADA)
+// FUNÇÃO PARA EMPURRAR AULAS PARA FRENTE (CORRIGIDA)
 // ============================================================
-function empurrarAulas($conn, $data_inicio, $data_fim, $id_unidade, $id_cliente, $turno_curso = null, $tipo_curso = null, $cursos_selecionados = []) {
+function empurrarAulas($conn, $data_inicio, $data_fim, $id_unidade, $id_cliente, $turnos, $tipos_curso, $cursos_selecionados = []) {
     try {
         $diasRecesso = buscarDiasRecesso($conn, $id_unidade, $id_cliente);
         
@@ -122,17 +122,30 @@ function empurrarAulas($conn, $data_inicio, $data_fim, $id_unidade, $id_cliente,
             ':id_cliente' => $id_cliente
         ];
         
-        if (!empty($turno_curso)) {
-            $sqlBuscar .= " AND c.turno = :turno_curso";
-            $params[':turno_curso'] = $turno_curso;
+        // Filtro de Turnos (MUDANÇA AQUI: Se não estiver vazio, filtra)
+        if (!empty($turnos) && is_array($turnos)) {
+            $placeholders = [];
+            foreach ($turnos as $i => $t) {
+                $paramName = ":turno_{$i}";
+                $placeholders[] = $paramName;
+                $params[$paramName] = $t;
+            }
+            $sqlBuscar .= " AND c.turno IN (" . implode(',', $placeholders) . ")";
         }
         
-        if (!empty($tipo_curso)) {
-            $sqlBuscar .= " AND cu.tipo_curso = :tipo_curso";
-            $params[':tipo_curso'] = $tipo_curso;
+        // Filtro de Tipos de Curso (MUDANÇA AQUI: Se não estiver vazio, filtra)
+        if (!empty($tipos_curso) && is_array($tipos_curso)) {
+            $placeholders = [];
+            foreach ($tipos_curso as $i => $t) {
+                $paramName = ":tipo_{$i}";
+                $placeholders[] = $paramName;
+                $params[$paramName] = $t;
+            }
+            $sqlBuscar .= " AND cu.tipo_curso IN (" . implode(',', $placeholders) . ")";
         }
         
-        if (!empty($cursos_selecionados)) {
+        // Filtro de Cursos Específicos
+        if (!empty($cursos_selecionados) && is_array($cursos_selecionados)) {
             $placeholders = [];
             foreach ($cursos_selecionados as $i => $id) {
                 $paramName = ":curso_{$i}";
@@ -231,9 +244,10 @@ function empurrarAulas($conn, $data_inicio, $data_fim, $id_unidade, $id_cliente,
             
             if ($encontrouData) {
                 $novaData = $dataAtual->format('Y-m-d');
+                
                 $sqlUpdate = "UPDATE cronograma SET 
-                                data_aula = :nova_data,
-                                observacao = CONCAT(COALESCE(observacao, ''), ' | Recesso em ', :data_original, ' - Aula remanejada para ', :nova_data)
+                                data_aula = CAST(:nova_data AS DATE),
+                                observacao = COALESCE(observacao, '') || ' | Recesso em ' || :data_original::text || ' - Aula remanejada para ' || :nova_data::text
                               WHERE id_aula = :id_aula AND id_cliente = :id_cliente";
                 $stmtUpdate = $conn->prepare($sqlUpdate);
                 $stmtUpdate->execute([
@@ -250,7 +264,7 @@ function empurrarAulas($conn, $data_inicio, $data_fim, $id_unidade, $id_cliente,
             } else {
                 $sqlUpdate = "UPDATE cronograma SET 
                                 status_aula = 'aguardando_remarcacao',
-                                observacao = CONCAT(COALESCE(observacao, ''), ' | Recesso em ', :data_original, ' - Aguardando remarcação')
+                                observacao = COALESCE(observacao, '') || ' | Recesso em ' || :data_original::text || ' - Aguardando remarcação'
                               WHERE id_aula = :id_aula AND id_cliente = :id_cliente";
                 $stmtUpdate = $conn->prepare($sqlUpdate);
                 $stmtUpdate->execute([
@@ -385,11 +399,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $data_fim = $_POST['data_fim'] ?? '';
     $id_unidade = !empty($_POST['id_unidade']) ? (int)$_POST['id_unidade'] : null;
     
-    $turno_curso = isset($_POST['turno_curso']) ? implode(',', $_POST['turno_curso']) : null;
-    $tipo_curso = isset($_POST['tipo_curso']) ? implode(',', $_POST['tipo_curso']) : null;
+    // Pega as seleções
+    $turnos = isset($_POST['turno_curso']) ? $_POST['turno_curso'] : [];
+    $tipos = isset($_POST['tipo_curso']) ? $_POST['tipo_curso'] : [];
     $cursos_selecionados = isset($_POST['cursos']) ? $_POST['cursos'] : [];
     $dias_semana = isset($_POST['dias_semana']) ? implode(',', $_POST['dias_semana']) : null;
     
+    // Se o usuário marcou "todos", limpamos o array para a função entender que é geral
+    if (in_array('todos', $turnos)) $turnos = [];
+    if (in_array('todos', $tipos)) $tipos = [];
+
     if ($tipo_periodo === 'unico') {
         $data_inicio = $data_unica;
         $data_fim = $data_unica;
@@ -406,6 +425,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
             $id_cursos = !empty($cursos_selecionados) ? implode(',', $cursos_selecionados) : null;
             
+            // Converter arrays de volta para string para salvar no banco
+            $turno_curso_str = !empty($turnos) ? implode(',', $turnos) : null;
+            $tipo_curso_str = !empty($tipos) ? implode(',', $tipos) : null;
+
             $sqlInsert = "INSERT INTO recessos (
                             nome_recesso, descricao, tipo, data_inicio, data_fim, ano,
                             id_unidade, id_cliente, turno_curso, tipo_curso, dias_semana, id_cursos, ativo
@@ -424,8 +447,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ':ano' => date('Y', strtotime($data_inicio)),
                 ':id_unidade' => $id_unidade,
                 ':id_cliente' => $id_cliente,
-                ':turno_curso' => $turno_curso,
-                ':tipo_curso' => $tipo_curso,
+                ':turno_curso' => $turno_curso_str,
+                ':tipo_curso' => $tipo_curso_str,
                 ':dias_semana' => $dias_semana,
                 ':id_cursos' => $id_cursos
             ]);
@@ -434,14 +457,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             
             $unidadeParaEmpurrar = $id_unidade ?? $id_unidade_usuario;
             
+            // Passamos os arrays limpos para a função
             $resultadoEmpurrar = empurrarAulas(
                 $conn, 
                 $data_inicio, 
                 $data_fim, 
                 $unidadeParaEmpurrar,
                 $id_cliente,
-                $turno_curso,
-                $tipo_curso,
+                $turnos,
+                $tipos,
                 $cursos_selecionados
             );
             
@@ -466,19 +490,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Registrar no histórico
             try {
                 $sqlHistorico = "INSERT INTO historico_sistema (
-                    id_funcionario,
-                    tabela_afetada,
-                    id_registro_afetado,
-                    acao,
-                    dados_novos,
-                    ip_origem
+                    id_funcionario, tabela_afetada, id_registro_afetado, acao, dados_novos, ip_origem
                 ) VALUES (
-                    :id_funcionario,
-                    'recessos',
-                    :id_registro,
-                    'INSERT',
-                    :dados,
-                    :ip
+                    :id_funcionario, 'recessos', :id_registro, 'INSERT', :dados, :ip
                 )";
                 $stmtHistorico = $conn->prepare($sqlHistorico);
                 $stmtHistorico->execute([
@@ -491,13 +505,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'data_fim' => $data_fim,
                         'id_unidade' => $id_unidade,
                         'cursos_afetados' => $cursos_selecionados,
-                        'turnos' => $turno_curso,
-                        'tipos_curso' => $tipo_curso
+                        'turnos' => $turnos,
+                        'tipos_curso' => $tipos
                     ]),
                     ':ip' => $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0'
                 ]);
             } catch (PDOException $e) {
-                // Não interrompe o processo
                 error_log('Erro ao registrar histórico: ' . $e->getMessage());
             }
             
@@ -517,62 +530,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $mensagem_sucesso .= "<br>📚 <strong>Cursos afetados:</strong> Todos os cursos";
             }
             
-            if (!empty($turno_curso)) {
-                $turnosLabels = [
-                    'manha' => 'Manhã',
-                    'tarde' => 'Tarde',
-                    'noite' => 'Noite',
-                    'integral' => 'Integral'
-                ];
-                $turnosArray = explode(',', $turno_curso);
+            if (!empty($turnos)) {
+                $turnosLabels = ['manha' => 'Manhã', 'tarde' => 'Tarde', 'noite' => 'Noite', 'integral' => 'Integral'];
                 $turnosNomes = [];
-                foreach ($turnosArray as $t) {
+                foreach ($turnos as $t) {
                     $turnosNomes[] = $turnosLabels[$t] ?? $t;
                 }
                 $mensagem_sucesso .= "<br>🕐 <strong>Turnos afetados:</strong> " . implode(', ', $turnosNomes);
+            } else {
+                $mensagem_sucesso .= "<br>🕐 <strong>Turnos afetados:</strong> Todos os turnos";
             }
             
-            if (!empty($tipo_curso)) {
-                $tiposLabels = [
-                    'curso_tecnico' => 'Técnico',
-                    'curso_agil' => 'Ágil',
-                    'pos_graduacao' => 'Pós-graduação'
-                ];
-                $tiposArray = explode(',', $tipo_curso);
+            if (!empty($tipos)) {
+                $tiposLabels = ['curso_tecnico' => 'Técnico', 'curso_agil' => 'Ágil', 'pos_graduacao' => 'Pós-graduação'];
                 $tiposNomes = [];
-                foreach ($tiposArray as $t) {
+                foreach ($tipos as $t) {
                     $tiposNomes[] = $tiposLabels[$t] ?? $t;
                 }
                 $mensagem_sucesso .= "<br>📖 <strong>Tipos de curso afetados:</strong> " . implode(', ', $tiposNomes);
+            } else {
+                $mensagem_sucesso .= "<br>📖 <strong>Tipos de curso afetados:</strong> Todos os tipos";
             }
             
             if ($aulasAfetadas > 0) {
-                $mensagem_sucesso .= "<br>📅 <strong>{$aulasAfetadas} aula(s)</strong> foram <strong>remanejadas</strong> para os próximos dias úteis.";
+                $mensagem_sucesso .= "<br>📅 <strong>{$aulasAfetadas} aula(s)</strong> foram <strong>remanejadas</strong>.";
             }
             
             if ($aulasAguardando > 0) {
                 $mensagem_sucesso .= "<br>⏳ <strong>{$aulasAguardando} aula(s)</strong> foram marcadas como <strong>'Aguardando Remarcação'</strong>.";
             }
             
-            if ($cursosAtualizados > 0) {
-                $mensagem_sucesso .= "<br>📅 <strong>Data de fim de " . $cursosAtualizados . " curso(s)</strong> foi atualizada automaticamente.";
-            }
-            
             if ($aulasAfetadas == 0 && $aulasAguardando == 0) {
                 $mensagem_sucesso .= "<br>📝 Nenhuma aula foi afetada pelo recesso com os filtros selecionados.";
             }
             
-            $mensagem_sucesso .= "<br>📌 <strong>Dias de recesso serão automaticamente ignorados no agendamento.</strong>";
-            
         } catch (Exception $e) {
-            if (isset($conn) && $conn->inTransaction()) {
-                $conn->rollBack();
-            }
+            if (isset($conn) && $conn->inTransaction()) $conn->rollBack();
             $mensagem_erro = '❌ ' . $e->getMessage();
         } catch (PDOException $e) {
-            if (isset($conn) && $conn->inTransaction()) {
-                $conn->rollBack();
-            }
+            if (isset($conn) && $conn->inTransaction()) $conn->rollBack();
             $mensagem_erro = '❌ Erro ao registrar recesso: ' . $e->getMessage();
         }
     } else {
@@ -623,7 +619,6 @@ $titulo = 'Registrar Recesso - Gerenciamento de Ambientes';
     <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet"/>
     
     <style>
-        /* MANTIDO O MESMO CSS DO SEU ARQUIVO ORIGINAL */
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: 'Inter', sans-serif;
@@ -750,6 +745,25 @@ $titulo = 'Registrar Recesso - Gerenciamento de Ambientes';
         .campo-periodo { display: block; }
         .campo-periodo.hidden { display: none; }
         
+        /* ESTILO NOVO PARA O BOTÃO "TODOS" */
+        .btn-todos {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 16px;
+            background: #e3f2fd;
+            color: #1a73e8;
+            border: 1px solid #1a73e8;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-bottom: 10px;
+        }
+        .btn-todos:hover { background: #1a73e8; color: #fff; }
+        .btn-todos.ativo { background: #1a73e8; color: #fff; }
+
         .checkbox-grid-cursos {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
@@ -879,8 +893,6 @@ $titulo = 'Registrar Recesso - Gerenciamento de Ambientes';
         }
         .info-box p { font-size: 13px; color: #5a6a7e; margin: 4px 0; }
         .info-box strong { color: #0e1a2b; }
-        .info-box.warning { border-left-color: #ffc107; background: #fff8e1; }
-        .info-box.danger { border-left-color: #dc3545; background: #ffe9e9; }
         .info-box.success { border-left-color: #28a745; background: #e6f7e9; }
         
         .alert { padding: 12px 16px; border-radius: 12px; font-size: 14px; font-weight: 500; margin-bottom: 18px; display: flex; align-items: center; gap: 8px; }
@@ -930,24 +942,6 @@ $titulo = 'Registrar Recesso - Gerenciamento de Ambientes';
             font-size: 11px;
             font-weight: 600;
         }
-        
-        .selecao-resumo {
-            margin-top: 8px;
-            padding: 10px 16px;
-            background: #e8f5e9;
-            border-radius: 8px;
-            border-left: 4px solid #43a047;
-            font-size: 13px;
-            color: #1b5e20;
-            display: none;
-        }
-        .selecao-resumo.active {
-            display: block;
-        }
-        .selecao-resumo i {
-            margin-right: 6px;
-            color: #43a047;
-        }
 
         @media (max-width: 640px) {
             .main { padding: 16px; }
@@ -966,7 +960,6 @@ $titulo = 'Registrar Recesso - Gerenciamento de Ambientes';
     </style>
     
     <script>
-        // MANTIDO O MESMO JAVASCRIPT DO SEU ARQUIVO ORIGINAL
         function togglePeriodo() {
             const tipoPeriodo = document.querySelector('input[name="tipo_periodo"]:checked').value;
             const campoUnico = document.getElementById('campoUnico');
@@ -994,6 +987,7 @@ $titulo = 'Registrar Recesso - Gerenciamento de Ambientes';
         }
 
         document.addEventListener('DOMContentLoaded', function() {
+            // Lógica do Período
             document.querySelectorAll('.periodo-opcoes input[type="radio"]').forEach(function(radio) {
                 radio.addEventListener('change', function() {
                     document.querySelectorAll('.periodo-opcoes label').forEach(function(label) {
@@ -1011,7 +1005,8 @@ $titulo = 'Registrar Recesso - Gerenciamento de Ambientes';
                 togglePeriodo();
             }
             
-            document.querySelectorAll('.checkbox-grid-cursos input[type="checkbox"]').forEach(function(checkbox) {
+            // Lógica para os Checkboxes
+            document.querySelectorAll('.checkbox-grid-cursos input[type="checkbox"], .checkbox-grid-simples input[type="checkbox"]').forEach(function(checkbox) {
                 checkbox.addEventListener('change', function() {
                     var label = this.closest('label');
                     if (this.checked) {
@@ -1019,52 +1014,46 @@ $titulo = 'Registrar Recesso - Gerenciamento de Ambientes';
                     } else {
                         label.classList.remove('selecionado');
                     }
-                    atualizarResumo();
                 });
             });
-            
-            document.querySelectorAll('.checkbox-grid-simples input[type="checkbox"]').forEach(function(checkbox) {
-                checkbox.addEventListener('change', function() {
-                    var label = this.closest('label');
-                    if (this.checked) {
-                        label.classList.add('selecionado');
+
+            // Lógica dos botões "Todos"
+            document.querySelectorAll('.btn-todos').forEach(function(btn) {
+                btn.addEventListener('click', function() {
+                    const targetGridId = this.getAttribute('data-target');
+                    const grid = document.getElementById(targetGridId);
+                    
+                    if (this.classList.contains('ativo')) {
+                        // Desmarcar todos
+                        this.classList.remove('ativo');
+                        grid.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+                            cb.checked = false;
+                            cb.closest('label').classList.remove('selecionado');
+                        });
                     } else {
-                        label.classList.remove('selecionado');
+                        // Marcar todos
+                        this.classList.add('ativo');
+                        grid.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+                            cb.checked = true;
+                            cb.closest('label').classList.add('selecionado');
+                        });
                     }
-                    atualizarResumo();
+                });
+            });
+
+            // Sincronizar botão "Todos" se desmarcar manualmente um item
+            document.querySelectorAll('.checkbox-grid-simples input[type="checkbox"], .checkbox-grid-cursos input[type="checkbox"]').forEach(function(checkbox) {
+                checkbox.addEventListener('change', function() {
+                    const grid = this.closest('.checkbox-grid-simples, .checkbox-grid-cursos');
+                    const btnTodos = document.querySelector(`.btn-todos[data-target="${grid.id}"]`);
+                    if (btnTodos) {
+                        const allChecked = Array.from(grid.querySelectorAll('input[type="checkbox"]')).every(cb => cb.checked);
+                        if (!allChecked) btnTodos.classList.remove('ativo');
+                    }
                 });
             });
             
-            function atualizarResumo() {
-                var cursosSelecionados = document.querySelectorAll('.checkbox-grid-cursos input[type="checkbox"]:checked');
-                var turnosSelecionados = document.querySelectorAll('.checkbox-grid-simples input[name="turno_curso[]"]:checked');
-                var tiposSelecionados = document.querySelectorAll('.checkbox-grid-simples input[name="tipo_curso[]"]:checked');
-                var resumo = document.getElementById('selecaoResumo');
-                var texto = '';
-                
-                if (cursosSelecionados.length > 0 || turnosSelecionados.length > 0 || tiposSelecionados.length > 0) {
-                    texto = '📌 ';
-                    if (cursosSelecionados.length > 0) {
-                        texto += cursosSelecionados.length + ' curso(s) ';
-                    }
-                    if (turnosSelecionados.length > 0) {
-                        if (cursosSelecionados.length > 0) texto += '• ';
-                        texto += turnosSelecionados.length + ' turno(s) ';
-                    }
-                    if (tiposSelecionados.length > 0) {
-                        if (cursosSelecionados.length > 0 || turnosSelecionados.length > 0) texto += '• ';
-                        texto += tiposSelecionados.length + ' tipo(s) de curso';
-                    }
-                    texto += ' selecionados';
-                    resumo.textContent = texto;
-                    resumo.classList.add('active');
-                } else {
-                    resumo.classList.remove('active');
-                }
-            }
-            
-            setTimeout(atualizarResumo, 100);
-            
+            // Lógica de datas
             document.getElementById('data_fim').addEventListener('change', function() {
                 const inicio = document.getElementById('data_inicio').value;
                 const fim = this.value;
@@ -1127,13 +1116,10 @@ $titulo = 'Registrar Recesso - Gerenciamento de Ambientes';
                 <p>• Nenhuma aula será <strong>excluída</strong> do sistema</p>
                 <p>• A data de fim dos cursos afetados será <strong>atualizada automaticamente</strong></p>
                 <p>• Novas aulas não serão agendadas em dias de recesso</p>
-                <p>• <strong>Você pode selecionar cursos, turnos e tipos de curso específicos</strong> para aplicar o recesso</p>
             </div>
 
             <form method="POST" action="" id="formRecesso">
-                <!-- ============================================================
-                SEÇÃO 1: INFORMAÇÕES BÁSICAS
-                ============================================================ -->
+                <!-- SEÇÃO 1: INFORMAÇÕES BÁSICAS -->
                 <div style="margin-bottom: 20px;">
                     <h3 style="font-size: 16px; font-weight: 600; color: #0e1a2b; margin-bottom: 12px;">
                         <i class="fas fa-info-circle" style="color: #1a73e8;"></i> Informações do Recesso
@@ -1164,9 +1150,7 @@ $titulo = 'Registrar Recesso - Gerenciamento de Ambientes';
                     </div>
                 </div>
 
-                <!-- ============================================================
-                SEÇÃO 2: PERÍODO
-                ============================================================ -->
+                <!-- SEÇÃO 2: PERÍODO -->
                 <div style="margin-bottom: 20px; padding-top: 16px; border-top: 2px solid #f0f4fb;">
                     <h3 style="font-size: 16px; font-weight: 600; color: #0e1a2b; margin-bottom: 12px;">
                         <i class="fas fa-calendar-alt" style="color: #1a73e8;"></i> Período do Recesso
@@ -1219,9 +1203,7 @@ $titulo = 'Registrar Recesso - Gerenciamento de Ambientes';
                     </div>
                 </div>
 
-                <!-- ============================================================
-                SEÇÃO 3: UNIDADE
-                ============================================================ -->
+                <!-- SEÇÃO 3: UNIDADE -->
                 <?php if ($tipo_usuario === 'admin_cliente'): ?>
                 <div style="margin-bottom: 20px; padding-top: 16px; border-top: 2px solid #f0f4fb;">
                     <h3 style="font-size: 16px; font-weight: 600; color: #0e1a2b; margin-bottom: 12px;">
@@ -1246,9 +1228,7 @@ $titulo = 'Registrar Recesso - Gerenciamento de Ambientes';
                     <input type="hidden" name="id_unidade" value="<?php echo $id_unidade_usuario; ?>">
                 <?php endif; ?>
 
-                <!-- ============================================================
-                SEÇÃO 4: CURSOS AFETADOS - CHECKBOX
-                ============================================================ -->
+                <!-- SEÇÃO 4: CURSOS AFETADOS - CHECKBOX -->
                 <div style="margin-bottom: 20px; padding-top: 16px; border-top: 2px solid #f0f4fb;">
                     <h3 style="font-size: 16px; font-weight: 600; color: #0e1a2b; margin-bottom: 12px;">
                         <i class="fas fa-book" style="color: #1a73e8;"></i> Cursos Afetados
@@ -1256,12 +1236,14 @@ $titulo = 'Registrar Recesso - Gerenciamento de Ambientes';
                     </h3>
                     <p style="font-size: 13px; color: #7a8aa0; margin-bottom: 12px;">
                         <i class="fas fa-info-circle"></i> 
-                        Selecione os cursos que serão afetados por este recesso. 
-                        <strong>Deixe em branco para aplicar a todos os cursos.</strong>
+                        Selecione os cursos específicos. Se não selecionar nenhum, aplica a <strong>TODOS</strong>.
                     </p>
+                    
+                    <button type="button" class="btn-todos" data-target="cursosGrid">
+                        <i class="fas fa-check-double"></i> Marcar Todos os Cursos
+                    </button>
 
                     <div class="form-group">
-                        <label><i class="fas fa-list"></i> Selecione os Cursos</label>
                         <div class="checkbox-grid-cursos" id="cursosGrid">
                             <?php foreach ($cursos as $curso): 
                                 $turnoLabel = [
@@ -1272,11 +1254,9 @@ $titulo = 'Registrar Recesso - Gerenciamento de Ambientes';
                                 ][$curso['turno_curso'] ?? 'manha'];
                                 
                                 $turnoClass = 'badge-turno-' . ($curso['turno_curso'] ?? 'manha');
-                                
                                 $dataInicio = !empty($curso['data_inicio_curso']) ? date('d/m/Y', strtotime($curso['data_inicio_curso'])) : 'N/I';
                                 $dataFim = !empty($curso['data_fim_curso_calculada']) ? date('d/m/Y', strtotime($curso['data_fim_curso_calculada'])) : 'N/I';
                                 $diasLetivos = $curso['dias_letivos'] ?? 0;
-                                
                                 $checked = (isset($_POST['cursos']) && in_array($curso['id_curso'], $_POST['cursos'])) ? 'checked' : '';
                             ?>
                                 <label class="<?php echo $checked ? 'selecionado' : ''; ?>">
@@ -1295,15 +1275,10 @@ $titulo = 'Registrar Recesso - Gerenciamento de Ambientes';
                                 </label>
                             <?php endforeach; ?>
                         </div>
-                        <small style="color: #7a8aa0; font-size: 12px; display: block; margin-top: 6px;">
-                            <i class="fas fa-info-circle"></i> Selecione um ou mais cursos. Deixe em branco para <strong>TODOS</strong>.
-                        </small>
                     </div>
                 </div>
 
-                <!-- ============================================================
-                SEÇÃO 5: TURNOS AFETADOS - CHECKBOX
-                ============================================================ -->
+                <!-- SEÇÃO 5: TURNOS AFETADOS - CHECKBOX -->
                 <div style="margin-bottom: 20px; padding-top: 16px; border-top: 2px solid #f0f4fb;">
                     <h3 style="font-size: 16px; font-weight: 600; color: #0e1a2b; margin-bottom: 12px;">
                         <i class="fas fa-clock" style="color: #1a73e8;"></i> Turnos Afetados
@@ -1311,12 +1286,14 @@ $titulo = 'Registrar Recesso - Gerenciamento de Ambientes';
                     </h3>
                     <p style="font-size: 13px; color: #7a8aa0; margin-bottom: 12px;">
                         <i class="fas fa-info-circle"></i> 
-                        Selecione os turnos que serão afetados por este recesso.
-                        <strong>Deixe em branco para aplicar a todos os turnos.</strong>
+                        Selecione os turnos específicos. Se não selecionar nenhum, aplica a <strong>TODOS</strong>.
                     </p>
 
+                    <button type="button" class="btn-todos" data-target="turnosGrid">
+                        <i class="fas fa-check-double"></i> Marcar Todos os Turnos
+                    </button>
+
                     <div class="form-group">
-                        <label><i class="fas fa-list"></i> Selecione os Turnos</label>
                         <div class="checkbox-grid-simples" id="turnosGrid">
                             <?php foreach ($turnosLista as $key => $label): 
                                 $checked = (isset($_POST['turno_curso']) && in_array($key, $_POST['turno_curso'])) ? 'checked' : '';
@@ -1327,15 +1304,10 @@ $titulo = 'Registrar Recesso - Gerenciamento de Ambientes';
                                 </label>
                             <?php endforeach; ?>
                         </div>
-                        <small style="color: #7a8aa0; font-size: 12px; display: block; margin-top: 6px;">
-                            <i class="fas fa-info-circle"></i> Selecione um ou mais turnos. Deixe em branco para <strong>TODOS</strong>.
-                        </small>
                     </div>
                 </div>
 
-                <!-- ============================================================
-                SEÇÃO 6: TIPOS DE CURSO AFETADOS - CHECKBOX
-                ============================================================ -->
+                <!-- SEÇÃO 6: TIPOS DE CURSO AFETADOS - CHECKBOX -->
                 <div style="margin-bottom: 20px; padding-top: 16px; border-top: 2px solid #f0f4fb;">
                     <h3 style="font-size: 16px; font-weight: 600; color: #0e1a2b; margin-bottom: 12px;">
                         <i class="fas fa-tag" style="color: #1a73e8;"></i> Tipos de Curso Afetados
@@ -1343,12 +1315,14 @@ $titulo = 'Registrar Recesso - Gerenciamento de Ambientes';
                     </h3>
                     <p style="font-size: 13px; color: #7a8aa0; margin-bottom: 12px;">
                         <i class="fas fa-info-circle"></i> 
-                        Selecione os tipos de curso que serão afetados por este recesso.
-                        <strong>Deixe em branco para aplicar a todos os tipos.</strong>
+                        Selecione os tipos específicos. Se não selecionar nenhum, aplica a <strong>TODOS</strong>.
                     </p>
 
+                    <button type="button" class="btn-todos" data-target="tiposGrid">
+                        <i class="fas fa-check-double"></i> Marcar Todos os Tipos
+                    </button>
+
                     <div class="form-group">
-                        <label><i class="fas fa-list"></i> Selecione os Tipos de Curso</label>
                         <div class="checkbox-grid-simples" id="tiposGrid">
                             <?php foreach ($tiposCursoLista as $key => $label): 
                                 $checked = (isset($_POST['tipo_curso']) && in_array($key, $_POST['tipo_curso'])) ? 'checked' : '';
@@ -1359,23 +1333,10 @@ $titulo = 'Registrar Recesso - Gerenciamento de Ambientes';
                                 </label>
                             <?php endforeach; ?>
                         </div>
-                        <small style="color: #7a8aa0; font-size: 12px; display: block; margin-top: 6px;">
-                            <i class="fas fa-info-circle"></i> Selecione um ou mais tipos. Deixe em branco para <strong>TODOS</strong>.
-                        </small>
                     </div>
                 </div>
 
-                <!-- ============================================================
-                RESUMO DE SELEÇÕES
-                ============================================================ -->
-                <div id="selecaoResumo" class="selecao-resumo">
-                    <i class="fas fa-check-circle"></i> 
-                    <span id="resumoTexto">Nenhuma seleção feita</span>
-                </div>
-
-                <!-- ============================================================
-                SEÇÃO 7: DIAS DA SEMANA
-                ============================================================ -->
+                <!-- SEÇÃO 7: DIAS DA SEMANA -->
                 <div style="margin-bottom: 20px; padding-top: 16px; border-top: 2px solid #f0f4fb;">
                     <h3 style="font-size: 16px; font-weight: 600; color: #0e1a2b; margin-bottom: 12px;">
                         <i class="fas fa-calendar-week" style="color: #1a73e8;"></i> Dias da Semana Afetados
@@ -1383,8 +1344,7 @@ $titulo = 'Registrar Recesso - Gerenciamento de Ambientes';
                     </h3>
                     <p style="font-size: 13px; color: #7a8aa0; margin-bottom: 12px;">
                         <i class="fas fa-info-circle"></i> 
-                        Selecione os dias da semana em que o recesso se aplica. 
-                        <strong>Deixe em branco para aplicar a todos os dias.</strong>
+                        Selecione os dias específicos. Se não selecionar nenhum, aplica a <strong>TODOS</strong>.
                     </p>
                     <div class="checkbox-grid-simples" id="diasSemanaGrid">
                         <?php foreach ($diasSemana as $key => $label): ?>
@@ -1395,14 +1355,9 @@ $titulo = 'Registrar Recesso - Gerenciamento de Ambientes';
                             </label>
                         <?php endforeach; ?>
                     </div>
-                    <small style="color: #7a8aa0; font-size: 12px; display: block; margin-top: 8px;">
-                        <i class="fas fa-info-circle"></i> Selecione os dias da semana afetados. Deixe em branco para <strong>TODOS</strong>.
-                    </small>
                 </div>
 
-                <!-- ============================================================
-                BOTÕES
-                ============================================================ -->
+                <!-- BOTÕES -->
                 <div class="form-actions">
                     <a href="listar_recesso.php" class="btn btn-secondary">
                         <i class="fas fa-times"></i> Cancelar

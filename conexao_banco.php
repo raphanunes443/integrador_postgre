@@ -10,10 +10,10 @@
 // 1. CONFIGURAÇÕES DO BANCO DE DADOS - SUPABASE
 // ============================================================
 
-$host = 'aws-0-us-east-2.pooler.supabase.com';
+$host = 'aws-0-sa-east-1.pooler.supabase.com';
 $port = '5432';
 $dbname = 'postgres';
-$username = 'postgres.aiyahroofixqkdxwhtjh';
+$username = 'postgres.zjcgawddxfxbbhtqjkof';
 $password = 'SIGAPROJ123';
 
 

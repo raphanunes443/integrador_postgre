@@ -80,6 +80,7 @@ try {
     // ============================================================
     foreach ($recessos as &$recesso) {
         if (!empty($recesso['id_cursos'])) {
+            // Se tem IDs específicos, busca só eles
             $ids = explode(',', $recesso['id_cursos']);
             $placeholders = implode(',', array_fill(0, count($ids), '?'));
             $sqlCursos = "SELECT id_curso, numero_curso, nome_curso, turno_curso, tipo_curso 
@@ -92,7 +93,24 @@ try {
             $stmtCursos->execute($paramsCursos);
             $recesso['cursos_afetados'] = $stmtCursos->fetchAll(PDO::FETCH_ASSOC);
         } else {
-            $recesso['cursos_afetados'] = [];
+            // NOVO: Se o recesso for para TODOS, busca todos os cursos reais do cliente
+            // Se o recesso tiver uma unidade específica, filtra ela também.
+            $sqlCursosTodos = "SELECT id_curso, numero_curso, nome_curso, turno_curso, tipo_curso 
+                               FROM cursos 
+                               WHERE id_cliente = ? AND status_curso = 'ativo'";
+            
+            $paramsCursosTodos = [$id_cliente];
+            
+            if (!empty($recesso['id_unidade'])) {
+                $sqlCursosTodos .= " AND id_unidade = ?";
+                $paramsCursosTodos[] = $recesso['id_unidade'];
+            }
+            
+            $sqlCursosTodos .= " ORDER BY numero_curso";
+            
+            $stmtCursosTodos = $conn->prepare($sqlCursosTodos);
+            $stmtCursosTodos->execute($paramsCursosTodos);
+            $recesso['cursos_afetados'] = $stmtCursosTodos->fetchAll(PDO::FETCH_ASSOC);
         }
     }
     
@@ -623,6 +641,7 @@ $message = getMessage();
                                 </td>
                                 <td>
                                     <?php if ($apenasUmCurso): ?>
+                                        <!-- Se for apenas 1 curso, mostra a caixinha verde -->
                                         <div class="apenas-um-curso-box">
                                             <i class="fas fa-graduation-cap" style="color: #43a047;"></i>
                                             <span class="numero-curso"><?php echo htmlspecialchars($cursosAfetados[0]['numero_curso']); ?></span>
@@ -631,10 +650,11 @@ $message = getMessage();
                                                 (<?php echo formatarTurno($cursosAfetados[0]['turno_curso'] ?? ''); ?>)
                                             </span>
                                         </div>
-                                    <?php elseif (!empty($cursosNomes)): ?>
+                                    <?php elseif (!empty($cursosAfetados)): ?>
+                                        <!-- Se for mais de um curso (ou todos), lista as tags -->
                                         <div class="cursos-container">
                                             <?php foreach ($cursosAfetados as $curso): ?>
-                                                <span class="curso-tag">
+                                                <span class="curso-tag" title="<?php echo htmlspecialchars($curso['nome_curso']); ?>">
                                                     <i class="fas fa-graduation-cap"></i>
                                                     <?php echo htmlspecialchars($curso['numero_curso']); ?>
                                                     <span class="turno-tag" style="font-size: 10px; color: #7a8aa0;">
@@ -644,7 +664,8 @@ $message = getMessage();
                                             <?php endforeach; ?>
                                         </div>
                                     <?php else: ?>
-                                        <span style="color: #1a73e8; font-weight: 500;">✅ Todos os cursos</span>
+                                        <!-- Fallback caso não encontre nenhum curso no banco -->
+                                        <span style="color: #7a8aa0; font-size: 12px; font-style: italic;">Nenhum curso ativo encontrado</span>
                                     <?php endif; ?>
                                 </td>
                                 <td>
